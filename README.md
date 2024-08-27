@@ -10,4 +10,17 @@ This required converting the StarDict Websters dictionary into an sqlite databas
 
 * See [You’re probably using the wrong dictionary](http://jsomers.net/blog/dictionary)
 
+Build a toy dictionary database
 
+```
+$ cd dict
+$ sqlite3 web1913.db < schema.sql
+$ sqlite3 web1913.db ".mode csv" ".import definitions_dump.csv definitions"
+$ sqlite3 web1913.db ".mode csv" ".import word_index_dump.csv word_index"
+```
+
+Run the dictionary
+
+```
+$ textual run dict/dict.py
+```

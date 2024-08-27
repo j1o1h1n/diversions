@@ -48,7 +48,7 @@ def score(word, freq, prefix, total):
 
 
 class Dictionary:
-    DICTIONARY = "app/dict/web1913.db"
+    DICTIONARY = "dict/web1913.db"
     LOOKUP = "SELECT d.word, d.definition FROM definitions d, word_index w WHERE d.definition_id = w.definition_id AND (w.word = ? or w.word = ?)"
     MATCH = "SELECT word, frequency FROM word_index WHERE word like ? or word like ? ORDER BY frequency DESC LIMIT 10"
 
