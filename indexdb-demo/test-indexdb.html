@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IndexedDB Service Worker Test</title>
+  <style>
+    body {
+      margin: 24px;
+      font-family: sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: 24px;
+    }
+
+    p {
+      max-width: 760px;
+      line-height: 1.5;
+      color: #475569;
+    }
+
+    button {
+      margin: 16px 0;
+      padding: 10px 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: white;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    code {
+      background: #e2e8f0;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+
+    table {
+      width: 100%;
+      max-width: 760px;
+      border-collapse: collapse;
+      background: white;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border: 1px solid #e2e8f0;
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5f9;
+    }
+
+    #status {
+      margin: 0 0 12px;
+      color: #334155;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>IndexedDB + Service Worker Test</h1>
+  <p>
+    Click the button. The page sends a message to the service worker.
+    The service worker writes one row to IndexedDB and then broadcasts that the data changed.
+    The page listens on a BroadcastChannel and then queries IndexedDB to reload the table.
+  </p>
+
+  <button id="add-row">Add Row Via Service Worker</button>
+  <div id="status">Waiting...</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Created At</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script src="https://cdn.jsdelivr.net/npm/idb@8/build/umd.js"></script>
+  <script>
+    const DB_NAME = "test-indexdb-sw";
+    const STORE_NAME = "rows";
+    const DB_VERSION = 1;
+
+    const status = document.getElementById("status");
+    const rows = document.getElementById("rows");
+    const channel = new BroadcastChannel("test-indexdb");
+    let worker = null;
+    let dbPromise = null;
+
+    function setStatus(message) {
+      status.textContent = message;
+    }
+
+    function openDb() {
+      if (!dbPromise) {
+        // Open the browser database once and reuse it for future reads.
+        dbPromise = idb.openDB(DB_NAME, DB_VERSION, {
+          upgrade(db) {
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+              db.createObjectStore(STORE_NAME, { keyPath: "id" });
+            }
+          },
+        });
+      }
+      return dbPromise;
+    }
+
+    async function render() {
+      // The page always redraws from IndexedDB instead of keeping its own copy of the rows.
+      const db = await openDb();
+      const all = await db.getAll(STORE_NAME);
+
+      all.sort(function (a, b) {
+        return b.id - a.id;
+      });
+
+      if (all.length === 0) {
+        rows.innerHTML = '<tr><td colspan="3">No rows yet.</td></tr>';
+        return;
+      }
+
+      rows.innerHTML = all.map(function (row) {
+        return "<tr>"
+          + "<td>" + row.id + "</td>"
+          + "<td>" + row.name + "</td>"
+          + "<td>" + row.createdAt + "</td>"
+          + "</tr>";
+      }).join("");
+    }
+
+    async function init() {
+      // Register the worker that will do the IndexedDB writes for us.
+      const registration = await navigator.serviceWorker.register("/static/test-indexdb-sw.js");
+      await navigator.serviceWorker.ready;
+      worker = registration.active || navigator.serviceWorker.controller;
+
+      channel.addEventListener("message", async function (event) {
+        if (!event.data) {
+          return;
+        }
+        if (event.data.type === "worker-received-add-row") {
+          setStatus("Service worker received add-row message");
+          return;
+        }
+        if (event.data.type === "row-added") {
+          // The page hears that data changed, then re-queries IndexedDB.
+          setStatus("Broadcast received for row " + event.data.id);
+          await render();
+        }
+      });
+
+      document.getElementById("add-row").onclick = async function () {
+        const registration = await navigator.serviceWorker.ready;
+        worker = navigator.serviceWorker.controller || registration.active;
+        // The page does not write the row itself. It sends a message to the service worker.
+        worker.postMessage({ type: "add-row" });
+        setStatus("Sent add-row to service worker");
+      };
+
+      await render();
+      setStatus("Ready");
+    }
+
+    init().catch(function (error) {
+      setStatus("Failed: " + error);
+    });
+  </script>
+</body>
+</html>
