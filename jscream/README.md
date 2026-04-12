@@ -11,6 +11,10 @@ The current implementation is intentionally narrow:
 - Floating point formatting currently delegates to `Double.toString(...)`, which may allocate.
 - The decoder currently supports ASCII JSON text plus standard string escapes. The encoder emits non-ASCII characters as `\uXXXX`.
 
+## TODO
+
+- Use [FastDoubleParser](https://github.com/wrandelshofer/FastDoubleParser/tree/main) for no-String double parsing
+
 ## Status
 
 This is a starting point for a specialised low-allocation codec, not a full JSON library.
