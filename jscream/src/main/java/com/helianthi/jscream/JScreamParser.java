@@ -1,9 +1,21 @@
 package com.helianthi.jscream;
 
+import java.util.Objects;
+import java.util.function.ToDoubleFunction;
+
 public final class JScreamParser {
 
     private final JScreamDecoder decoder = new JScreamDecoder();
     private final JScreamTape tape = new JScreamTape();
+    private final ToDoubleFunction<ByteSlice> doubleParser;
+
+    public JScreamParser() {
+        this(bs -> Double.parseDouble(bs.toString()));
+    }
+
+    public JScreamParser(ToDoubleFunction<ByteSlice> doubleParser) {
+        this.doubleParser = Objects.requireNonNull(doubleParser, "doubleParser");
+    }
 
     public JSValue parse(ByteArrayBuilder buff) {
         decoder.prepare(buff);
@@ -18,7 +30,7 @@ public final class JScreamParser {
                     tape.addInt64(decoder.longValue());
                     break;
                 case NUMBER:
-                    tape.addDouble(Double.parseDouble(decoder.numberText().toString()));
+                    tape.addDouble(doubleParser.applyAsDouble(decoder.numberValue()));
                     break;
                 case START_OBJECT:
                     tape.addObject();

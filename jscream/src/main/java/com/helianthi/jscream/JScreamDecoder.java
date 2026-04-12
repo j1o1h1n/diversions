@@ -17,6 +17,7 @@ public final class JScreamDecoder {
     private static final byte STATE_ARRAY_COMMA_OR_END = 5;
 
     private final ByteSlice stringView = new ByteSlice();
+    private final ByteSlice numberView = new ByteSlice();
 
     private byte[] input = new byte[0];
     private int limit;
@@ -154,6 +155,13 @@ public final class JScreamDecoder {
         return new String(input, numberStart, numberLength, StandardCharsets.US_ASCII);
     }
 
+    public ByteSlice numberValue() {
+        if (token != JSToken.NUMBER) {
+            throw new IllegalStateException("current token is not NUMBER");
+        }
+        return numberView;
+    }
+
     private JSToken parseValueToken() {
         if (position >= limit) {
             throw error("unexpected end of input");
@@ -283,6 +291,7 @@ public final class JScreamDecoder {
 
         numberStart = start;
         numberLength = position - start;
+        numberView.use(input, numberStart, numberLength);
         if (!integer) {
             return JSToken.NUMBER;
         }

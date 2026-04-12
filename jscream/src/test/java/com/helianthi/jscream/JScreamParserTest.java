@@ -30,6 +30,17 @@ class JScreamParserTest {
     }
 
     @Test
+    void usesConfiguredDoubleParser() {
+        ByteArrayBuilder buffer = new ByteArrayBuilder(16);
+        buffer.appendAscii("3.14");
+
+        JSValue value = new JScreamParser(bs -> 42.5d).parse(buffer);
+
+        assertEquals(JScreamTape.DOUBLE, value.valueType());
+        assertEquals(42.5d, value.doubleValue());
+    }
+
+    @Test
     void parsesSimpleString() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
         buffer.appendAscii("\"hello\"");
