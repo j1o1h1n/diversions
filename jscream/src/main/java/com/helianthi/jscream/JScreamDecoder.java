@@ -252,13 +252,15 @@ public final class JScreamDecoder {
         }
     }
 
+    int hash;
     private void parseString() {
         expect('"');
         int start = position;
+        hash = 1;
         while (position < limit) {
             byte ch = input[position++];
             if (ch == '"') {
-                stringView.use(input, start, (position - 1) - start);
+                stringView.use(input, start, (position - 1) - start, hash);
                 return;
             }
             if (ch == '\\') {
@@ -268,6 +270,7 @@ public final class JScreamDecoder {
             if ((ch & 0xFF) < 0x20) {
                 throw error("control characters are not allowed in strings");
             }
+            hash = (31 * hash) + ch;
         }
         throw error("unterminated string");
     }

@@ -35,6 +35,7 @@ public final class JScreamTape {
 
     private final IntLinkedListArray linkedLists = new IntLinkedListArray(256, 16);
     private final PackedIntLists packedLists = new PackedIntLists(256 * 16);
+    private final ByteSliceIntMap objectKeyIndex = new ByteSliceIntMap(this);
 
     // getters
 
@@ -102,11 +103,18 @@ public final class JScreamTape {
 
     final ByteSlice keyBuffer = new ByteSlice();
 
+    int objectKeyHandle(int objectEntry, ByteSlice wanted) {
+        return objectKeyIndex.get(objectEntry, wanted);
+    }
+
     int indexOfObjectKey(int objectEntry, ByteSlice wanted) {
+        int keyHandle = objectKeyHandle(objectEntry, wanted);
+        if (keyHandle < 0) {
+            return -1;
+        }
         int size = packedLists.size(objectEntry);
         for (int i = 0; i < size; i++) {
-            stringValue(packedLists.get(objectEntry, i), keyBuffer);
-            if (contentEquals(keyBuffer, wanted)) {
+            if (packedLists.get(objectEntry, i) == keyHandle) {
                 return i;
             }
         }
@@ -142,12 +150,12 @@ public final class JScreamTape {
     }
 
     public void clear() {
-        this.bytes = new byte[0];
         this.tapeHead = 0;
         this.stackHead = -1;
         this.state = STATE_NONE;
         this.linkedLists.reset();
         this.packedLists.reset();
+        this.objectKeyIndex.clear();
         Arrays.fill(this.tape, (char) 0);
         Arrays.fill(this.values, 0L);
         Arrays.fill(this.rawRanges, 0L);
@@ -174,6 +182,17 @@ public final class JScreamTape {
             int e = (int) values[h];
             values[h] = packedLists.list();
             linkedLists.forEach(e, packedLists::append);
+        }
+        for (int h = 0; h < tapeHead; h++) {
+            if (tape[h] != OBJECT) {
+                continue;
+            }
+            int objectEntry = (int) values[h];
+            int size = packedLists.size(objectEntry);
+            for (int i = 0; i < size; i++) {
+                int keyHandle = packedLists.get(objectEntry, i);
+                objectKeyIndex.put(objectEntry, stringValue(keyHandle, keyBuffer), keyHandle);
+            }
         }
     }
 

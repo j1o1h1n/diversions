@@ -34,12 +34,12 @@ public final class JSObject {
     }
 
     public boolean containsKey(ByteSlice key) {
-        return parent.indexOfObjectKey(e, key) >= 0;
+        return parent.objectKeyHandle(e, key) >= 0;
     }
 
     public JSValue get(ByteSlice key, JSValue target) {
-        int index = parent.indexOfObjectKey(e, key);
-        return index < 0 ? null : valueAt(index, target);
+        int keyHandle = parent.objectKeyHandle(e, key);
+        return keyHandle < 0 ? null : parent.value(keyHandle + 1, target);
     }
 
     public JSValue valueAt(int index, JSValue target) {

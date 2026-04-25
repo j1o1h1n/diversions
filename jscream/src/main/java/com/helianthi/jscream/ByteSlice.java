@@ -7,17 +7,25 @@ import java.nio.charset.StandardCharsets;
  * by the next string token.
  */
 public final class ByteSlice {
+    private static final int NOT_CALCULATED = Integer.MIN_VALUE;
+
     private byte[] bytes = new byte[0];
     private int pos;
     private int length;
+    private int hashCode;
 
     public ByteSlice() {
     }
 
     void use(byte[] bytes, int pos, int length) {
+        use(bytes, pos, length, NOT_CALCULATED);
+    }
+
+    void use(byte[] bytes, int pos, int length, int hashCode) {
         this.bytes = bytes;
         this.pos = pos;
         this.length = length;
+        this.hashCode = hashCode;
     }
 
     public int pos() {
@@ -30,6 +38,19 @@ public final class ByteSlice {
 
     public int length() {
         return length;
+    }
+
+    @Override
+    public int hashCode() {
+        if (hashCode == NOT_CALCULATED) {
+            int hash = 1;
+            int end = pos + length;
+            for (int i = pos; i < end; i++) {
+                hash = (31 * hash) + bytes[i];
+            }
+            hashCode = hash;
+        }
+        return hashCode;
     }
 
     @Override
