@@ -6,7 +6,7 @@ The current implementation is intentionally narrow:
 
 - Encoder state is reusable and buffer-backed.
 - Decoder is pull-style and returns reusable views.
-- Parser builds a reusable `JScreamTape` and returns lightweight `JSValue` wrappers over it.
+- Parser builds a reusable `JScreamTape` and writes into caller-supplied lightweight views.
 - String tokens are carried as raw source slices and decoded lazily on access when escapes are present.
 - Floating point formatting currently delegates to `Double.toString(...)`, which may allocate.
 - The decoder currently supports ASCII JSON text plus standard string escapes. The encoder emits non-ASCII characters as `\uXXXX`.
@@ -22,8 +22,8 @@ This is a starting point for a specialised low-allocation codec, not a full JSON
 - Expected use is single threaded.
 - Callers are expected to reuse `ByteArrayBuilder`, `JScreamEncoder`, `JScreamDecoder`, and `JScreamParser`.
 - Decoder string values are returned through a reusable mutable view. Read or copy them before the next `next()` call if you need to retain content.
-- Parsed `JSValue`, `JSArray`, `JSObject`, and `ByteSlice` instances are reusable views backed by `JScreamTape`.
-- `JSObject.forEach(...)` reuses a single mutable `Entry` view per iteration. Copy out fields if you need to retain them.
+- Parsed `JSValue`, `JSArray`, `JSObject`, and `ByteSlice` instances are caller-owned reusable views backed by `JScreamTape`.
+- Parsed accessors fill supplied target views. Copy out fields if you need to retain them across later view reuse or parser reuse.
 
 ## Build
 
@@ -88,38 +88,65 @@ for (JSToken token = decoder.next(); token != JSToken.EOF; token = decoder.next(
 
 ```java
 import com.helianthi.jscream.ByteArrayBuilder;
+import com.helianthi.jscream.ByteSlice;
 import com.helianthi.jscream.JSArray;
 import com.helianthi.jscream.JSObject;
 import com.helianthi.jscream.JSValue;
 import com.helianthi.jscream.JScreamParser;
 
 ByteArrayBuilder buff = new ByteArrayBuilder(128);
-buff.appendAscii("{\"t\":354,\"d\":[{\"a\":1,\"b\":\"2\"},null,[99,88,77],{\"a\":100,\"b\":200},false],\"n\":null,\"s\":\"hello\",\"x\":9876}");
+buff.append("{\"t\":354,\"d\":[{\"a\":1,\"b\":\"2\"},null,[99,88,77],{\"a\":100,\"b\":200},false],\"n\":null,\"s\":\"hello\",\"x\":9876}");
 
 JScreamParser parser = new JScreamParser();
-JSValue root = parser.parse(buff);
+JSValue root = new JSValue();
+JSObject object = new JSObject();
+JSValue value = new JSValue();
+ByteSlice key = new ByteSlice();
 
-JSObject object = root.objectValue();
-object.forEach(entry -> {
-    System.out.println(entry.key + " -> " + entry.value.valueType());
-});
+parser.parse(buff, root);
+root.objectValue(object);
+
+for (int i = 0; i < object.size(); i++) {
+    object.keyAt(i, key);
+    object.valueAt(i, value);
+    System.out.println(key + " -> " + value.valueType());
+}
+
+ByteSlice rawObject = new ByteSlice();
+object.rawValue(rawObject); // raw JSON including { and }
 ```
 
 Typical typed access looks like:
 
 ```java
-JSValue root = parser.parse(buff);
-JSObject object = root.objectValue();
+JSValue root = new JSValue();
+JSObject object = new JSObject();
+JSValue value = new JSValue();
+JSValue data = new JSValue();
+ByteSlice key = new ByteSlice();
 
-final JSValue[] data = new JSValue[1];
-object.forEach(entry -> {
-    if ("d".contentEquals(entry.key)) {
-        data[0] = entry.value;
+parser.parse(buff, root);
+root.objectValue(object);
+
+for (int i = 0; i < object.size(); i++) {
+    object.keyAt(i, key);
+    object.valueAt(i, value);
+    if ("d".contentEquals(key)) {
+        object.valueAt(i, data);
+        break;
     }
-});
+}
 
-JSArray array = data[0].arrayValue();
-array.forEach(item -> System.out.println(item.valueType()));
+JSArray array = new JSArray();
+data.arrayValue(array);
+
+ByteSlice rawArray = new ByteSlice();
+array.rawValue(rawArray); // raw JSON including [ and ]
+
+for (int i = 0; i < array.size(); i++) {
+    array.valueAt(i, value);
+    System.out.println(value.valueType());
+}
 ```
 
 ## Layout

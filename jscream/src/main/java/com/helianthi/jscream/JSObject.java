@@ -1,24 +1,26 @@
 package com.helianthi.jscream;
 
-import java.util.function.Consumer;
-
 public final class JSObject {
 
-    private final JScreamTape parent;
-    private final PackedIntLists packedLists;
-    private final Entry entry;
-
+    private JScreamTape parent;
+    private PackedIntLists packedLists;
+    private int tapeHandle = -1;
     private int e = -1;
 
-    public JSObject(JScreamTape parent, PackedIntLists packedLists) {
+    public JSObject() {
+    }
+
+    JSObject use(JScreamTape parent, PackedIntLists packedLists, int tapeHandle, int e) {
         this.parent = parent;
         this.packedLists = packedLists;
-        this.entry = new Entry();
-    }
- 
-    JSObject use(int e) {
+        this.tapeHandle = tapeHandle;
         this.e = e;
         return this;
+    }
+
+    public ByteSlice rawValue(ByteSlice target) {
+        requireEntry();
+        return parent.rawValue(tapeHandle, target);
     }
 
     public int size() {
@@ -26,14 +28,23 @@ public final class JSObject {
         return packedLists.size(e);
     }
 
-    public void forEach(Consumer<Entry> consumer) {
+    public ByteSlice keyAt(int index, ByteSlice target) {
         requireEntry();
-        for (int i = 0; i < packedLists.size(e); i++) {
-            int h = packedLists.get(e, i);
-            entry.key = parent.stringValue(h);
-            entry.value = parent.value(h + 1);
-            consumer.accept(entry);
-        }
+        return parent.stringValue(packedLists.get(e, index), target);
+    }
+
+    public boolean containsKey(ByteSlice key) {
+        return indexOf(key) >= 0;
+    }
+
+    public JSValue get(ByteSlice key, JSValue target) {
+        int index = indexOf(key);
+        return index < 0 ? null : valueAt(index, target);
+    }
+
+    public JSValue valueAt(int index, JSValue target) {
+        requireEntry();
+        return parent.value(packedLists.get(e, index) + 1, target);
     }
 
     private void requireEntry() {
@@ -42,9 +53,33 @@ public final class JSObject {
         }
     }
 
-    public static class Entry {
-        public ByteSlice key;
-        public JSValue value;
+    private int indexOf(ByteSlice wanted) {
+        requireEntry();
+        int size = packedLists.size(e);
+        ByteSlice key = new ByteSlice();
+        for (int i = 0; i < size; i++) {
+            keyAt(i, key);
+            if (contentEquals(key, wanted)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
+    private boolean contentEquals(ByteSlice left, ByteSlice right) {
+        int length = left.length();
+        if (length != right.length()) {
+            return false;
+        }
+        byte[] leftBytes = left.bytes();
+        byte[] rightBytes = right.bytes();
+        int leftPos = left.pos();
+        int rightPos = right.pos();
+        for (int i = 0; i < length; i++) {
+            if (leftBytes[leftPos + i] != rightBytes[rightPos + i]) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

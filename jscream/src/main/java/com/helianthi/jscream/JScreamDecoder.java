@@ -13,8 +13,10 @@ public final class JScreamDecoder {
     private static final byte STATE_OBJECT_KEY_OR_END = 1;
     private static final byte STATE_OBJECT_VALUE = 2;
     private static final byte STATE_OBJECT_COMMA_OR_END = 3;
-    private static final byte STATE_ARRAY_VALUE_OR_END = 4;
-    private static final byte STATE_ARRAY_COMMA_OR_END = 5;
+    private static final byte STATE_OBJECT_KEY = 4;
+    private static final byte STATE_ARRAY_VALUE_OR_END = 5;
+    private static final byte STATE_ARRAY_COMMA_OR_END = 6;
+    private static final byte STATE_ARRAY_VALUE = 7;
 
     private final ByteSlice stringView = new ByteSlice();
     private final ByteSlice numberView = new ByteSlice();
@@ -32,6 +34,8 @@ public final class JScreamDecoder {
     private long longValue;
     private int numberStart;
     private int numberLength;
+    private int tokenStart;
+    private int tokenEnd;
 
     public JScreamDecoder prepare(ByteArrayBuilder source) {
         return prepare(source.buffer(), source.size());
@@ -50,6 +54,8 @@ public final class JScreamDecoder {
         this.longValue = 0L;
         this.numberStart = 0;
         this.numberLength = 0;
+        this.tokenStart = 0;
+        this.tokenEnd = 0;
         return this;
     }
 
@@ -81,10 +87,12 @@ public final class JScreamDecoder {
 
                 if (state == STATE_OBJECT_COMMA_OR_END) {
                     if (tryConsume(',')) {
-                        states[depth - 1] = STATE_OBJECT_KEY_OR_END;
+                        states[depth - 1] = STATE_OBJECT_KEY;
                         continue;
                     }
+                    tokenStart = position;
                     if (tryConsume('}')) {
+                        tokenEnd = position;
                         depth--;
                         markParentValueComplete();
                         return token = JSToken.END_OBJECT;
@@ -92,12 +100,26 @@ public final class JScreamDecoder {
                     throw error("expected ',' or '}'");
                 }
 
+                if (state == STATE_OBJECT_KEY) {
+                    tokenStart = position;
+                    parseString();
+                    tokenEnd = position;
+                    skipWhitespace();
+                    expect(':');
+                    states[depth - 1] = STATE_OBJECT_VALUE;
+                    return token = JSToken.FIELD_NAME;
+                }
+
+                tokenStart = position;
                 if (tryConsume('}')) {
+                    tokenEnd = position;
                     depth--;
                     markParentValueComplete();
                     return token = JSToken.END_OBJECT;
                 }
+                tokenStart = position;
                 parseString();
+                tokenEnd = position;
                 skipWhitespace();
                 expect(':');
                 states[depth - 1] = STATE_OBJECT_VALUE;
@@ -106,10 +128,12 @@ public final class JScreamDecoder {
 
             if (state == STATE_ARRAY_COMMA_OR_END) {
                 if (tryConsume(',')) {
-                    states[depth - 1] = STATE_ARRAY_VALUE_OR_END;
+                    states[depth - 1] = STATE_ARRAY_VALUE;
                     continue;
                 }
+                tokenStart = position;
                 if (tryConsume(']')) {
+                    tokenEnd = position;
                     depth--;
                     markParentValueComplete();
                     return token = JSToken.END_ARRAY;
@@ -117,7 +141,17 @@ public final class JScreamDecoder {
                 throw error("expected ',' or ']'");
             }
 
+            if (state == STATE_ARRAY_VALUE) {
+                token = parseValueToken();
+                if (depth > 0 && containerTypes[depth - 1] == TYPE_ARRAY && isScalarToken(token)) {
+                    states[depth - 1] = STATE_ARRAY_COMMA_OR_END;
+                }
+                return token;
+            }
+
+            tokenStart = position;
             if (tryConsume(']')) {
+                tokenEnd = position;
                 depth--;
                 markParentValueComplete();
                 return token = JSToken.END_ARRAY;
@@ -132,6 +166,14 @@ public final class JScreamDecoder {
 
     public JSToken token() {
         return token;
+    }
+
+    public int tokenStart() {
+        return tokenStart;
+    }
+
+    public int tokenEnd() {
+        return tokenEnd;
     }
 
     public long longValue() {
@@ -166,35 +208,43 @@ public final class JScreamDecoder {
         if (position >= limit) {
             throw error("unexpected end of input");
         }
+        tokenStart = position;
         byte ch = input[position];
         switch (ch) {
             case '{':
                 position++;
+                tokenEnd = position;
                 push(TYPE_OBJECT, STATE_OBJECT_KEY_OR_END);
                 return JSToken.START_OBJECT;
             case '[':
                 position++;
+                tokenEnd = position;
                 push(TYPE_ARRAY, STATE_ARRAY_VALUE_OR_END);
                 return JSToken.START_ARRAY;
             case '"':
                 parseString();
+                tokenEnd = position;
                 markParentValueComplete();
                 return JSToken.STRING;
             case 't':
                 expectLiteral("true");
+                tokenEnd = position;
                 markParentValueComplete();
                 return JSToken.TRUE;
             case 'f':
                 expectLiteral("false");
+                tokenEnd = position;
                 markParentValueComplete();
                 return JSToken.FALSE;
             case 'n':
                 expectLiteral("null");
+                tokenEnd = position;
                 markParentValueComplete();
                 return JSToken.NULL;
             default:
                 if (ch == '-' || isDigit(ch)) {
                     JSToken numeric = parseNumber();
+                    tokenEnd = position;
                     markParentValueComplete();
                     return numeric;
                 }
@@ -215,8 +265,8 @@ public final class JScreamDecoder {
                 validateEscape();
                 continue;
             }
-            if (ch < 0x20 || (ch & 0x80) != 0) {
-                throw error("only ASCII JSON strings are supported by this minimal decoder");
+            if ((ch & 0xFF) < 0x20) {
+                throw error("control characters are not allowed in strings");
             }
         }
         throw error("unterminated string");
@@ -238,14 +288,14 @@ public final class JScreamDecoder {
             case 't':
                 return;
             case 'u':
-                parseUnicodeEscapeAscii();
+                parseUnicodeEscape();
                 return;
             default:
                 throw error("unsupported escape");
         }
     }
 
-    private void parseUnicodeEscapeAscii() {
+    private void parseUnicodeEscape() {
         if (position + 4 > limit) {
             throw error("incomplete unicode escape");
         }
@@ -262,9 +312,6 @@ public final class JScreamDecoder {
             } else {
                 throw error("invalid unicode escape");
             }
-        }
-        if (value > 0x7F) {
-            throw error("only ASCII unicode escapes are supported by this minimal decoder");
         }
     }
 

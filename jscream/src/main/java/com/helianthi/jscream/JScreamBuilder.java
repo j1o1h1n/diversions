@@ -28,14 +28,14 @@ public final class JScreamBuilder {
     public JScreamBuilder object() {
         beforeValue();
         push(TYPE_OBJECT);
-        out.appendAscii('{');
+        out.append('{');
         return this;
     }
 
     public JScreamBuilder array() {
         beforeValue();
         push(TYPE_ARRAY);
-        out.appendAscii('[');
+        out.append('[');
         return this;
     }
 
@@ -47,10 +47,10 @@ public final class JScreamBuilder {
 
         int index = depth - 1;
         if (itemCounts[index] > 0) {
-            out.appendAscii(',');
+            out.append(',');
         }
         out.appendJsonString(key);
-        out.appendAscii(':');
+        out.append(':');
         expectingValue = true;
         return this;
     }
@@ -79,13 +79,13 @@ public final class JScreamBuilder {
 
     public JScreamBuilder value(boolean value) {
         beforeValue();
-        out.appendAscii(value ? "true" : "false");
+        out.append(value ? "true" : "false");
         return this;
     }
 
     public JScreamBuilder nullValue() {
         beforeValue();
-        out.appendAscii("null");
+        out.append("null");
         return this;
     }
 
@@ -97,7 +97,7 @@ public final class JScreamBuilder {
             throw new IllegalStateException("object key has no value");
         }
         byte type = containerTypes[--depth];
-        out.appendAscii(type == TYPE_OBJECT ? '}' : ']');
+        out.append(type == TYPE_OBJECT ? '}' : ']');
         afterValue();
         return this;
     }
@@ -126,7 +126,7 @@ public final class JScreamBuilder {
         }
 
         if (itemCounts[index] > 0) {
-            out.appendAscii(',');
+            out.append(',');
         }
         itemCounts[index]++;
     }

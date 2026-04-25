@@ -1,23 +1,23 @@
 package com.helianthi.jscream;
 
 import java.util.Objects;
-import java.util.function.ToDoubleFunction;
+import java.nio.charset.StandardCharsets;
 
 public final class JScreamParser {
 
     private final JScreamDecoder decoder = new JScreamDecoder();
     private final JScreamTape tape = new JScreamTape();
-    private final ToDoubleFunction<ByteSlice> doubleParser;
+    private final ByteSliceToDoubleFunction doubleParser;
 
     public JScreamParser() {
-        this(bs -> Double.parseDouble(bs.toString()));
+        this((bytes, offset, length) -> Double.parseDouble(new String(bytes, offset, length, StandardCharsets.US_ASCII)));
     }
 
-    public JScreamParser(ToDoubleFunction<ByteSlice> doubleParser) {
+    public JScreamParser(ByteSliceToDoubleFunction doubleParser) {
         this.doubleParser = Objects.requireNonNull(doubleParser, "doubleParser");
     }
 
-    public JSValue parse(ByteArrayBuilder buff) {
+    public JSValue parse(ByteArrayBuilder buff, JSValue target) {
         decoder.prepare(buff);
         tape.prepare(buff.buffer());
         for (JSToken token = decoder.next(); token != JSToken.EOF; token = decoder.next()) {
@@ -30,19 +30,20 @@ public final class JScreamParser {
                     tape.addInt64(decoder.longValue());
                     break;
                 case NUMBER:
-                    tape.addDouble(doubleParser.applyAsDouble(decoder.numberValue()));
+                    ByteSlice number = decoder.numberValue();
+                    tape.addDouble(doubleParser.applyAsDouble(number.bytes(), number.pos(), number.length()));
                     break;
                 case START_OBJECT:
-                    tape.addObject();
+                    tape.addObject(decoder.tokenStart());
                     break;
                 case END_OBJECT:
-                    tape.endObject();
+                    tape.endObject(decoder.tokenEnd());
                     break;
                 case START_ARRAY:
-                    tape.addArray();
+                    tape.addArray(decoder.tokenStart());
                     break;
                 case END_ARRAY:
-                    tape.endArray();
+                    tape.endArray(decoder.tokenEnd());
                     break;
                 case TRUE:
                     tape.addBoolean(true);
@@ -60,7 +61,7 @@ public final class JScreamParser {
             }
         }
         tape.close();
-        return tape.value(0);
+        return tape.value(0, target);
     }
 
 }

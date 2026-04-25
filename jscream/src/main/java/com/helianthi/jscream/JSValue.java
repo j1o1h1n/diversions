@@ -2,16 +2,15 @@ package com.helianthi.jscream;
 
 public final class JSValue {
 
-    private final JScreamTape parent;
-
+    private JScreamTape parent;
     private char type;
     private long valueRef;
 
-    public JSValue(JScreamTape parent) {
-        this.parent = parent;
+    public JSValue() {
     }
 
-    JSValue use(char type, long valueRef) {
+    JSValue use(JScreamTape parent, char type, long valueRef) {
+        this.parent = parent;
         this.type = type;
         this.valueRef = valueRef;
         return this;
@@ -46,24 +45,33 @@ public final class JSValue {
         return valueRef == 1;
     }
 
-    public ByteSlice stringValue() {
+    public ByteSlice stringValue(ByteSlice target) {
         requireType(JScreamTape.STRING);
-        return parent.stringValue((int) valueRef);
+        requireParent();
+        return parent.stringValue((int) valueRef, target);
     }
 
-    public JSArray arrayValue() {
+    public JSArray arrayValue(JSArray target) {
         requireType(JScreamTape.ARRAY);
-        return parent.arrayValue((int) valueRef);
+        requireParent();
+        return parent.arrayValue((int) valueRef, target);
     }
 
-    public JSObject objectValue() {
+    public JSObject objectValue(JSObject target) {
         requireType(JScreamTape.OBJECT);
-        return parent.objectValue((int) valueRef);
+        requireParent();
+        return parent.objectValue((int) valueRef, target);
     }
 
     private void requireType(char expected) {
         if (type != expected) {
             throw new IllegalStateException("expected " + expected + " but was " + type);
+        }
+    }
+
+    private void requireParent() {
+        if (parent == null) {
+            throw new IllegalStateException("value is not initialized");
         }
     }
 }

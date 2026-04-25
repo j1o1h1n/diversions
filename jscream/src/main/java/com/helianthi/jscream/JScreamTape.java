@@ -22,7 +22,9 @@ public final class JScreamTape {
 
     private char[] tape = new char[256];
     private long[] values = new long[256];
+    private long[] rawRanges = new long[256];
     private long[] stack = new long[256];
+    private int[] stackHandles = new int[256];
     private final ByteArrayBuilder decodedString = new ByteArrayBuilder(64);
 
 
@@ -34,26 +36,12 @@ public final class JScreamTape {
     private final IntLinkedListArray linkedLists = new IntLinkedListArray(256, 16);
     private final PackedIntLists packedLists = new PackedIntLists(256 * 16);
 
-    private final ObjectPool<JSValue> valuePool;
-    private final ObjectPool<ByteSlice> slicePool;
-    private final ObjectPool<JSArray> arrayPool;
-    private final ObjectPool<JSObject> objectPool;
-
-    public JScreamTape() {
-        this.valuePool = new ObjectPool<>(() -> new JSValue(this));
-        this.slicePool = new ObjectPool<>(ByteSlice::new);
-        this.arrayPool = new ObjectPool<>(() -> new JSArray(this, packedLists));
-        this.objectPool = new ObjectPool<>(() -> new JSObject(this, packedLists));
-    }
-
     // getters
 
-    public JSValue value(int h) {
-         JSValue value = valuePool.acquire();
+    public JSValue value(int h, JSValue target) {
          char t = typeOf(h);
          long ref = (t == INT64 || t == DOUBLE || t == BOOL) ? values[h] : h;
-         value.use(t, ref);
-         return value;
+         return target.use(this, t, ref);
     }
 
     public char typeOf(int h) {
@@ -86,39 +74,44 @@ public final class JScreamTape {
         return val == 1;
     }
 
-    public ByteSlice stringValue(int h) {
+    public ByteSlice stringValue(int h, ByteSlice target) {
         requireType(h, STRING);
         long packed = values[h];
         int pos = unpackLeft(packed);
         int length = unpackRight(packed);
         if (length >= 0) {
-            ByteSlice slice = slicePool.acquire();
-            slice.use(bytes, pos, length);
-            return slice;
+            target.use(bytes, pos, length);
+            return target;
         }
 
         decodedString.clear();
         decodeString(pos, -length);
-        ByteSlice slice = slicePool.acquire();
-        slice.use(decodedString.buffer(), 0, decodedString.size());
-        return slice;
+        target.use(decodedString.buffer(), 0, decodedString.size());
+        return target;
     }
 
-    public JSArray arrayValue(int h) {
+    public JSArray arrayValue(int h, JSArray target) {
         requireType(h, ARRAY);
-        return arrayPool.acquire().use((int) values[h]);
+        return target.use(this, packedLists, h, (int) values[h]);
     }
 
-    public JSObject objectValue(int h) {
+    public JSObject objectValue(int h, JSObject target) {
         requireType(h, OBJECT);
-        return objectPool.acquire().use((int) values[h]);
+        return target.use(this, packedLists, h, (int) values[h]);
+    }
+
+    public ByteSlice rawValue(int h, ByteSlice target) {
+        if (tape[h] != ARRAY && tape[h] != OBJECT) {
+            throw new IllegalStateException("expected array/object but was " + tape[h]);
+        }
+        long packed = rawRanges[h];
+        int pos = unpackLeft(packed);
+        int length = unpackRight(packed);
+        target.use(bytes, pos, length);
+        return target;
     }
 
     public void clear() {
-        this.valuePool.clear();
-        this.slicePool.clear();
-        this.arrayPool.clear();
-        this.objectPool.clear();
         this.bytes = new byte[0];
         this.tapeHead = 0;
         this.stackHead = -1;
@@ -127,7 +120,9 @@ public final class JScreamTape {
         this.packedLists.reset();
         Arrays.fill(this.tape, (char) 0);
         Arrays.fill(this.values, 0L);
+        Arrays.fill(this.rawRanges, 0L);
         Arrays.fill(this.stack, 0L);
+        Arrays.fill(this.stackHandles, 0);
     }
 
     // builders
@@ -152,7 +147,7 @@ public final class JScreamTape {
         }
     }
 
-    void addArray() {
+    void addArray(int start) {
         if (state == STATE_DONE) {
             throw invalidState("cannot add array after close()");
         }
@@ -165,23 +160,27 @@ public final class JScreamTape {
         stackHead++;
         ensureCapacity(tapeHead + 1, stackHead + 1);
         tape[tapeHead] = ARRAY;
+        rawRanges[tapeHead] = pack(start, 0);
+        stackHandles[stackHead] = tapeHead;
         values[tapeHead] = stack[stackHead] = this.linkedLists.list();
         this.state = STATE_ARRAY;
         tapeHead++;
     }
 
-    void endArray() {
+    void endArray(int end) {
         if (state == STATE_DONE) {
             throw invalidState("cannot end array after close()");
         }
         if (state != STATE_ARRAY) {
             throw invalidState("not in array state");
         }
+        int h = stackHandles[stackHead];
+        rawRanges[h] = pack(unpackLeft(rawRanges[h]), end - unpackLeft(rawRanges[h]));
         stackHead--;
         this.state = stackHead < 0 ? STATE_NONE : this.tape[this.linkedLists.get((int) stack[stackHead], 0) - 1] == ARRAY ? STATE_ARRAY : STATE_OBJECT_KEY;
     }
 
-    void addObject() {
+    void addObject(int start) {
         if (state == STATE_DONE) {
             throw invalidState("cannot add object after close()");
         }
@@ -192,20 +191,24 @@ public final class JScreamTape {
             this.linkedLists.append((int) stack[stackHead], tapeHead);
         }
         stackHead++;
-        ensureCapacity(tapeHead, stackHead + 1);
+        ensureCapacity(tapeHead + 1, stackHead + 1);
         tape[tapeHead] = OBJECT;
+        rawRanges[tapeHead] = pack(start, 0);
+        stackHandles[stackHead] = tapeHead;
         values[tapeHead] = stack[stackHead] = this.linkedLists.list();
         this.state = STATE_OBJECT_KEY;
         tapeHead++;
     }
 
-    void endObject() {
+    void endObject(int end) {
         if (state == STATE_DONE) {
             throw invalidState("cannot end object after close()");
         }
         if (state != STATE_OBJECT_KEY) {
             throw invalidState("object is not ready to end");
         }
+        int h = stackHandles[stackHead];
+        rawRanges[h] = pack(unpackLeft(rawRanges[h]), end - unpackLeft(rawRanges[h]));
         stackHead--;
         this.state = stackHead < 0 ? STATE_NONE : this.tape[this.linkedLists.get((int) stack[stackHead], 0) - 1] == ARRAY ? STATE_ARRAY : STATE_OBJECT_KEY;
     }
@@ -313,6 +316,7 @@ public final class JScreamTape {
             }
             tape = Arrays.copyOf(tape, newLength);
             values = Arrays.copyOf(values, newLength);
+            rawRanges = Arrays.copyOf(rawRanges, newLength);
         }
 
         int stackRequired = requiredStack + 1;
@@ -322,6 +326,7 @@ public final class JScreamTape {
                 newLength <<= 1;
             }
             stack = Arrays.copyOf(stack, newLength);
+            stackHandles = Arrays.copyOf(stackHandles, newLength);
         }
     }
 
@@ -380,8 +385,23 @@ public final class JScreamTape {
                     decodedString.appendByte((byte) '\t');
                     break;
                 case 'u':
-                    decodedString.appendByte(parseUnicodeEscapeAscii(i + 1));
+                    int codeUnit = parseUnicodeEscape(i + 1);
                     i += 4;
+                    if (Character.isHighSurrogate((char) codeUnit)
+                        && i + 6 < end
+                        && bytes[i + 1] == '\\'
+                        && bytes[i + 2] == 'u') {
+                        int low = parseUnicodeEscape(i + 3);
+                        if (Character.isLowSurrogate((char) low)) {
+                            appendUtf8(Character.toCodePoint((char) codeUnit, (char) low));
+                            i += 6;
+                            break;
+                        }
+                    }
+                    if (Character.isLowSurrogate((char) codeUnit)) {
+                        throw new IllegalArgumentException("unexpected low surrogate");
+                    }
+                    appendUtf8(codeUnit);
                     break;
                 default:
                     throw new IllegalArgumentException("unsupported escape");
@@ -389,7 +409,7 @@ public final class JScreamTape {
         }
     }
 
-    private byte parseUnicodeEscapeAscii(int pos) {
+    private int parseUnicodeEscape(int pos) {
         int value = 0;
         for (int i = 0; i < 4; i++) {
             byte ch = bytes[pos + i];
@@ -404,10 +424,29 @@ public final class JScreamTape {
                 throw new IllegalArgumentException("invalid unicode escape");
             }
         }
-        if (value > 0x7F) {
-            throw new IllegalArgumentException("only ASCII unicode escapes are supported");
+        return value;
+    }
+
+    private void appendUtf8(int codePoint) {
+        if (codePoint < 0x80) {
+            decodedString.appendByte((byte) codePoint);
+            return;
         }
-        return (byte) value;
+        if (codePoint < 0x800) {
+            decodedString.appendByte((byte) (0xC0 | (codePoint >>> 6)));
+            decodedString.appendByte((byte) (0x80 | (codePoint & 0x3F)));
+            return;
+        }
+        if (codePoint < 0x10000) {
+            decodedString.appendByte((byte) (0xE0 | (codePoint >>> 12)));
+            decodedString.appendByte((byte) (0x80 | ((codePoint >>> 6) & 0x3F)));
+            decodedString.appendByte((byte) (0x80 | (codePoint & 0x3F)));
+            return;
+        }
+        decodedString.appendByte((byte) (0xF0 | (codePoint >>> 18)));
+        decodedString.appendByte((byte) (0x80 | ((codePoint >>> 12) & 0x3F)));
+        decodedString.appendByte((byte) (0x80 | ((codePoint >>> 6) & 0x3F)));
+        decodedString.appendByte((byte) (0x80 | (codePoint & 0x3F)));
     }
 
     private void requireType(int h, char expected) {

@@ -1,21 +1,26 @@
 package com.helianthi.jscream;
 
-import java.util.function.Consumer;
-
 public final class JSArray {
 
-    private final JScreamTape parent;
-    private final PackedIntLists packedLists;
+    private JScreamTape parent;
+    private PackedIntLists packedLists;
+    private int tapeHandle = -1;
     private int h = -1;
 
-    public JSArray(JScreamTape parent, PackedIntLists packedLists) {
+    public JSArray() {
+    }
+
+    JSArray use(JScreamTape parent, PackedIntLists packedLists, int tapeHandle, int listHandle) {
         this.parent = parent;
         this.packedLists = packedLists;
-    }
- 
-    JSArray use(int h) {
-        this.h = h;
+        this.tapeHandle = tapeHandle;
+        this.h = listHandle;
         return this;
+    }
+
+    public ByteSlice rawValue(ByteSlice target) {
+        requireHandle();
+        return parent.rawValue(tapeHandle, target);
     }
 
     public int size() {
@@ -23,11 +28,9 @@ public final class JSArray {
         return packedLists.size(h);
     }
 
-    public void forEach(Consumer<JSValue> consumer) {
+    public JSValue valueAt(int index, JSValue target) {
         requireHandle();
-        for (int i = 0; i < packedLists.size(h); i++) {
-            consumer.accept(parent.value(packedLists.get(h, i)));
-        }
+        return parent.value(packedLists.get(h, index), target);
     }
 
     private void requireHandle() {

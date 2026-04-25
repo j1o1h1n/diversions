@@ -2,17 +2,24 @@ package com.helianthi.jscream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 class JScreamParserTest {
     @Test
     void parsesSimpleLong() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
-        buffer.appendAscii("1234");
+        buffer.append("1234");
 
-        JSValue value = new JScreamParser().parse(buffer);
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
 
         assertEquals(JScreamTape.INT64, value.valueType());
         assertEquals(1234L, value.longValue());
@@ -21,9 +28,9 @@ class JScreamParserTest {
     @Test
     void parsesSimpleDouble() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
-        buffer.appendAscii("3.14");
+        buffer.append("3.14");
 
-        JSValue value = new JScreamParser().parse(buffer);
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
 
         assertEquals(JScreamTape.DOUBLE, value.valueType());
         assertEquals(3.14d, value.doubleValue());
@@ -32,31 +39,66 @@ class JScreamParserTest {
     @Test
     void usesConfiguredDoubleParser() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
-        buffer.appendAscii("3.14");
+        buffer.append("3.14");
 
-        JSValue value = new JScreamParser(bs -> 42.5d).parse(buffer);
+        JSValue value = new JScreamParser((bytes, offset, length) -> 42.5d).parse(buffer, new JSValue());
 
         assertEquals(JScreamTape.DOUBLE, value.valueType());
         assertEquals(42.5d, value.doubleValue());
     }
 
     @Test
+    void usesFastDoubleParser() {
+        ByteArrayBuilder buffer = new ByteArrayBuilder(32);
+        buffer.append("12345.6789");
+
+        JSValue value = new JScreamParser(JavaDoubleParser::parseDouble).parse(buffer, new JSValue());
+
+        assertEquals(JScreamTape.DOUBLE, value.valueType());
+        assertEquals(12345.6789d, value.doubleValue());
+    }
+
+    @Test
     void parsesSimpleString() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
-        buffer.appendAscii("\"hello\"");
+        buffer.append("\"hello\"");
 
-        JSValue value = new JScreamParser().parse(buffer);
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
+        ByteSlice string = new ByteSlice();
 
         assertEquals(JScreamTape.STRING, value.valueType());
-        assertEquals("hello", value.stringValue().toString());
+        assertEquals("hello", value.stringValue(string).toString());
+    }
+
+    @Test
+    void parsesUtf8String() {
+        ByteArrayBuilder buffer = utf8Buffer("{\"city\":\"São Paulo\"}");
+
+        JSValue root = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = root.objectValue(new JSObject());
+        ByteSlice string = new ByteSlice();
+
+        assertEquals("São Paulo", object.valueAt(0, new JSValue()).stringValue(string).toString());
+    }
+
+    @Test
+    void decodesUnicodeEscapesToUtf8() {
+        ByteArrayBuilder buffer = new ByteArrayBuilder(64);
+        buffer.append("{\"text\":\"caf\\u00e9 \\uD83D\\uDE03\"}");
+
+        JSValue root = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = root.objectValue(new JSObject());
+        ByteSlice string = new ByteSlice();
+
+        assertEquals("café 😃", object.valueAt(0, new JSValue()).stringValue(string).toString());
     }
 
     @Test
     void parsesTrueBoolean() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
-        buffer.appendAscii("true");
+        buffer.append("true");
 
-        JSValue value = new JScreamParser().parse(buffer);
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
 
         assertEquals(JScreamTape.BOOL, value.valueType());
         assertTrue(value.boolValue());
@@ -65,9 +107,9 @@ class JScreamParserTest {
     @Test
     void parsesFalseBoolean() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
-        buffer.appendAscii("false");
+        buffer.append("false");
 
-        JSValue value = new JScreamParser().parse(buffer);
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
 
         assertEquals(JScreamTape.BOOL, value.valueType());
         assertFalse(value.boolValue());
@@ -76,9 +118,9 @@ class JScreamParserTest {
     @Test
     void parsesNull() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(16);
-        buffer.appendAscii("null");
+        buffer.append("null");
 
-        JSValue value = new JScreamParser().parse(buffer);
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
 
         assertEquals(JScreamTape.NULL_VALUE, value.valueType());
     }
@@ -86,161 +128,248 @@ class JScreamParserTest {
     @Test
     void parsesArray() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(32);
-        buffer.appendAscii("[1,\"two\",false]");
+        buffer.append("[1,\"two\",false]");
 
-        JSValue value = new JScreamParser().parse(buffer);
-        JSArray array = value.arrayValue();
-        JSValue[] items = new JSValue[3];
-        int[] index = {0};
-
-        array.forEach(item -> items[index[0]++] = item);
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
+        JSArray array = value.arrayValue(new JSArray());
+        JSValue first = array.valueAt(0, new JSValue());
+        JSValue second = array.valueAt(1, new JSValue());
+        JSValue third = array.valueAt(2, new JSValue());
+        ByteSlice string = new ByteSlice();
 
         assertEquals(JScreamTape.ARRAY, value.valueType());
         assertEquals(3, array.size());
-        assertEquals(JScreamTape.INT64, items[0].valueType());
-        assertEquals(1L, items[0].longValue());
-        assertEquals(JScreamTape.STRING, items[1].valueType());
-        assertEquals("two", items[1].stringValue().toString());
-        assertEquals(JScreamTape.BOOL, items[2].valueType());
-        assertFalse(items[2].boolValue());
+        assertEquals(JScreamTape.INT64, first.valueType());
+        assertEquals(1L, first.longValue());
+        assertEquals(JScreamTape.STRING, second.valueType());
+        assertEquals("two", second.stringValue(string).toString());
+        assertEquals(JScreamTape.BOOL, third.valueType());
+        assertFalse(third.boolValue());
     }
 
     @Test
     void parsesObject() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(32);
-        buffer.appendAscii("{\"a\":1}");
+        buffer.append("{\"a\":1}");
 
-        JSValue value = new JScreamParser().parse(buffer);
-        JSObject object = value.objectValue();
-        String[] key = new String[1];
-        JSValue[] parsedValue = new JSValue[1];
-
-        object.forEach(entry -> {
-            key[0] = entry.key.toString();
-            parsedValue[0] = entry.value;
-        });
+        JSValue value = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = value.objectValue(new JSObject());
+        ByteSlice key = object.keyAt(0, new ByteSlice());
+        JSValue parsedValue = object.valueAt(0, new JSValue());
 
         assertEquals(JScreamTape.OBJECT, value.valueType());
         assertEquals(1, object.size());
-        assertEquals("a", key[0]);
-        assertEquals(JScreamTape.INT64, parsedValue[0].valueType());
-        assertEquals(1L, parsedValue[0].longValue());
+        assertEquals("a", key.toString());
+        assertEquals(JScreamTape.INT64, parsedValue.valueType());
+        assertEquals(1L, parsedValue.longValue());
+    }
+
+    @Test
+    void looksUpObjectValuesByKey() {
+        ByteArrayBuilder buffer = new ByteArrayBuilder(64);
+        buffer.append("{\"a\":1,\"b\":true}");
+
+        JSValue root = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = root.objectValue(new JSObject());
+        ByteSlice a = new ByteSlice();
+        a.use("a".getBytes(), 0, 1);
+        ByteSlice b = new ByteSlice();
+        b.use("b".getBytes(), 0, 1);
+        ByteSlice missing = new ByteSlice();
+        missing.use("z".getBytes(), 0, 1);
+
+        assertTrue(object.containsKey(a));
+        assertTrue(object.containsKey(b));
+        assertFalse(object.containsKey(missing));
+        assertEquals(1L, object.get(a, new JSValue()).longValue());
+        assertTrue(object.get(b, new JSValue()).boolValue());
+        assertNull(object.get(missing, new JSValue()));
+    }
+
+    @Test
+    void parsesReferenceJsonFixturesFromResources() {
+        assertEquals(JScreamTape.OBJECT, parseResource("json/rfc-example-object.json").valueType());
+        assertEquals(JScreamTape.ARRAY, parseResource("json/rfc-example-array.json").valueType());
+        assertEquals(JScreamTape.OBJECT, parseResource("json/jsonsuite-valid-basic-object.json").valueType());
+        assertEquals(JScreamTape.OBJECT, parseResource("json/canada.json").valueType());
+        assertEquals(JScreamTape.OBJECT, parseResource("json/citm_catalog.json").valueType());
+    }
+
+    @Test
+    void hashesValuesFromHardCodedRfcObjectLookups() {
+        JSValue root = parseResource("json/rfc-example-object.json");
+        JSObject rootObject = root.objectValue(new JSObject());
+        JSObject image = rootObject.get(asciiKey("Image"), new JSValue()).objectValue(new JSObject());
+        JSObject thumbnail = image.get(asciiKey("Thumbnail"), new JSValue()).objectValue(new JSObject());
+        JSArray ids = image.get(asciiKey("IDs"), new JSValue()).arrayValue(new JSArray());
+        ByteSlice string = new ByteSlice();
+
+        int hash = 1;
+        hash = (31 * hash) + Long.hashCode(image.get(asciiKey("Width"), new JSValue()).longValue());
+        hash = (31 * hash) + Long.hashCode(image.get(asciiKey("Height"), new JSValue()).longValue());
+        hash = (31 * hash) + image.get(asciiKey("Title"), new JSValue()).stringValue(string).toString().hashCode();
+        hash = (31 * hash) + thumbnail.get(asciiKey("Url"), new JSValue()).stringValue(string).toString().hashCode();
+        hash = (31 * hash) + Long.hashCode(thumbnail.get(asciiKey("Height"), new JSValue()).longValue());
+        hash = (31 * hash) + Long.hashCode(thumbnail.get(asciiKey("Width"), new JSValue()).longValue());
+        hash = (31 * hash) + Boolean.hashCode(image.get(asciiKey("Animated"), new JSValue()).boolValue());
+        hash = (31 * hash) + Long.hashCode(ids.valueAt(0, new JSValue()).longValue());
+        hash = (31 * hash) + Long.hashCode(ids.valueAt(1, new JSValue()).longValue());
+        hash = (31 * hash) + Long.hashCode(ids.valueAt(2, new JSValue()).longValue());
+        hash = (31 * hash) + Long.hashCode(ids.valueAt(3, new JSValue()).longValue());
+
+        assertEquals(-19782094, hash);
+    }
+
+    @Test
+    void rejectsInvalidReferenceJsonFixture() {
+        assertThrows(IllegalArgumentException.class,
+            () -> parseResource("json/jsonsuite-invalid-trailing-comma.json"));
+    }
+
+    @Test
+    void getsRawContainerJson() {
+        ByteArrayBuilder buffer = new ByteArrayBuilder(64);
+        buffer.append("{\"a\":[1,{\"b\":2}],\"c\":true}");
+
+        JSValue root = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = root.objectValue(new JSObject());
+        JSValue arrayValue = object.valueAt(0, new JSValue());
+        JSArray array = arrayValue.arrayValue(new JSArray());
+        JSValue nestedObjectValue = array.valueAt(1, new JSValue());
+        JSObject nestedObject = nestedObjectValue.objectValue(new JSObject());
+        ByteSlice raw = new ByteSlice();
+
+        assertEquals("{\"a\":[1,{\"b\":2}],\"c\":true}", object.rawValue(raw).toString());
+        assertEquals("[1,{\"b\":2}]", array.rawValue(raw).toString());
+        assertEquals("{\"b\":2}", nestedObject.rawValue(raw).toString());
     }
 
     @Test
     void parsesNestedStructure() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(64);
-        buffer.appendAscii("{\"a\":[1],\"b\":{\"c\":true}}");
+        buffer.append("{\"a\":[1],\"b\":{\"c\":true}}");
 
-        JSValue root = new JScreamParser().parse(buffer);
-        JSObject object = root.objectValue();
-        String[] keys = new String[2];
-        JSValue[] values = new JSValue[2];
-        int[] index = {0};
-
-        object.forEach(entry -> {
-            int i = index[0]++;
-            keys[i] = entry.key.toString();
-            values[i] = entry.value;
-        });
+        JSValue root = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = root.objectValue(new JSObject());
+        ByteSlice key = new ByteSlice();
+        JSValue firstValue = object.valueAt(0, new JSValue());
+        JSValue secondValue = object.valueAt(1, new JSValue());
 
         assertEquals(JScreamTape.OBJECT, root.valueType());
         assertEquals(2, object.size());
-        assertEquals("a", keys[0]);
-        assertEquals(JScreamTape.ARRAY, values[0].valueType());
-        JSValue[] arrayItems = new JSValue[1];
-        values[0].arrayValue().forEach(item -> arrayItems[0] = item);
-        assertEquals(1L, arrayItems[0].longValue());
+        assertEquals("a", object.keyAt(0, key).toString());
+        assertEquals(JScreamTape.ARRAY, firstValue.valueType());
+        JSArray array = firstValue.arrayValue(new JSArray());
+        JSValue arrayItem = array.valueAt(0, new JSValue());
+        assertEquals(1L, arrayItem.longValue());
 
-        assertEquals("b", keys[1]);
-        assertEquals(JScreamTape.OBJECT, values[1].valueType());
-        String[] nestedKey = new String[1];
-        JSValue[] nestedValue = new JSValue[1];
-        values[1].objectValue().forEach(entry -> {
-            nestedKey[0] = entry.key.toString();
-            nestedValue[0] = entry.value;
-        });
-        assertEquals("c", nestedKey[0]);
-        assertTrue(nestedValue[0].boolValue());
+        assertEquals("b", object.keyAt(1, key).toString());
+        assertEquals(JScreamTape.OBJECT, secondValue.valueType());
+        JSObject nestedObject = secondValue.objectValue(new JSObject());
+        JSValue nestedValue = nestedObject.valueAt(0, new JSValue());
+        assertEquals("c", nestedObject.keyAt(0, key).toString());
+        assertTrue(nestedValue.boolValue());
     }
 
     @Test
     void parsesMixedDeepStructure() {
         ByteArrayBuilder buffer = new ByteArrayBuilder(128);
-        buffer.appendAscii("{\"t\":354,\"d\":[{\"a\":1,\"b\":\"2\"},null,[99,88,77],{\"a\":100,\"b\":200},false],\"n\":null,\"s\":\"hello\",\"x\":9876}");
+        buffer.append("{\"t\":354,\"d\":[{\"a\":1,\"b\":\"2\"},null,[99,88,77],{\"a\":100,\"b\":200},false],\"n\":null,\"s\":\"hello\",\"x\":9876}");
 
-        JSValue root = new JScreamParser().parse(buffer);
-        JSObject object = root.objectValue();
-
-        String[] keys = new String[5];
-        JSValue[] values = new JSValue[5];
-        int[] index = {0};
-        object.forEach(entry -> {
-            int i = index[0]++;
-            keys[i] = entry.key.toString();
-            values[i] = entry.value;
-        });
+        JSValue root = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = root.objectValue(new JSObject());
+        ByteSlice key = new ByteSlice();
+        ByteSlice string = new ByteSlice();
+        JSValue t = object.valueAt(0, new JSValue());
+        JSValue dValue = object.valueAt(1, new JSValue());
+        JSValue n = object.valueAt(2, new JSValue());
+        JSValue s = object.valueAt(3, new JSValue());
+        JSValue x = object.valueAt(4, new JSValue());
 
         assertEquals(JScreamTape.OBJECT, root.valueType());
         assertEquals(5, object.size());
 
-        assertEquals("t", keys[0]);
-        assertEquals(354L, values[0].longValue());
+        assertEquals("t", object.keyAt(0, key).toString());
+        assertEquals(354L, t.longValue());
 
-        assertEquals("d", keys[1]);
-        JSArray d = values[1].arrayValue();
+        assertEquals("d", object.keyAt(1, key).toString());
+        JSArray d = dValue.arrayValue(new JSArray());
         assertEquals(5, d.size());
-        JSValue[] dItems = new JSValue[5];
-        int[] dIndex = {0};
-        d.forEach(item -> dItems[dIndex[0]++] = item);
+        JSValue firstItem = d.valueAt(0, new JSValue());
+        JSValue nullItem = d.valueAt(1, new JSValue());
+        JSValue nestedArrayItem = d.valueAt(2, new JSValue());
+        JSValue secondObjectItem = d.valueAt(3, new JSValue());
+        JSValue falseItem = d.valueAt(4, new JSValue());
 
-        JSObject firstObject = dItems[0].objectValue();
-        String[] firstKeys = new String[2];
-        JSValue[] firstValues = new JSValue[2];
-        int[] firstIndex = {0};
-        firstObject.forEach(entry -> {
-            int i = firstIndex[0]++;
-            firstKeys[i] = entry.key.toString();
-            firstValues[i] = entry.value;
-        });
-        assertEquals("a", firstKeys[0]);
-        assertEquals(1L, firstValues[0].longValue());
-        assertEquals("b", firstKeys[1]);
-        assertEquals("2", firstValues[1].stringValue().toString());
+        JSObject firstObject = firstItem.objectValue(new JSObject());
+        JSValue firstA = firstObject.valueAt(0, new JSValue());
+        JSValue firstB = firstObject.valueAt(1, new JSValue());
+        assertEquals("a", firstObject.keyAt(0, key).toString());
+        assertEquals(1L, firstA.longValue());
+        assertEquals("b", firstObject.keyAt(1, key).toString());
+        assertEquals("2", firstB.stringValue(string).toString());
 
-        assertEquals(JScreamTape.NULL_VALUE, dItems[1].valueType());
+        assertEquals(JScreamTape.NULL_VALUE, nullItem.valueType());
 
-        JSArray nestedArray = dItems[2].arrayValue();
-        JSValue[] nestedArrayItems = new JSValue[3];
-        int[] nestedArrayIndex = {0};
-        nestedArray.forEach(item -> nestedArrayItems[nestedArrayIndex[0]++] = item);
-        assertEquals(99L, nestedArrayItems[0].longValue());
-        assertEquals(88L, nestedArrayItems[1].longValue());
-        assertEquals(77L, nestedArrayItems[2].longValue());
+        JSArray nestedArray = nestedArrayItem.arrayValue(new JSArray());
+        assertEquals(99L, nestedArray.valueAt(0, new JSValue()).longValue());
+        assertEquals(88L, nestedArray.valueAt(1, new JSValue()).longValue());
+        assertEquals(77L, nestedArray.valueAt(2, new JSValue()).longValue());
 
-        JSObject secondObject = dItems[3].objectValue();
-        String[] secondKeys = new String[2];
-        JSValue[] secondValues = new JSValue[2];
-        int[] secondIndex = {0};
-        secondObject.forEach(entry -> {
-            int i = secondIndex[0]++;
-            secondKeys[i] = entry.key.toString();
-            secondValues[i] = entry.value;
-        });
-        assertEquals("a", secondKeys[0]);
-        assertEquals(100L, secondValues[0].longValue());
-        assertEquals("b", secondKeys[1]);
-        assertEquals(200L, secondValues[1].longValue());
+        JSObject secondObject = secondObjectItem.objectValue(new JSObject());
+        JSValue secondA = secondObject.valueAt(0, new JSValue());
+        JSValue secondB = secondObject.valueAt(1, new JSValue());
+        assertEquals("a", secondObject.keyAt(0, key).toString());
+        assertEquals(100L, secondA.longValue());
+        assertEquals("b", secondObject.keyAt(1, key).toString());
+        assertEquals(200L, secondB.longValue());
 
-        assertFalse(dItems[4].boolValue());
+        assertFalse(falseItem.boolValue());
 
-        assertEquals("n", keys[2]);
-        assertEquals(JScreamTape.NULL_VALUE, values[2].valueType());
+        assertEquals("n", object.keyAt(2, key).toString());
+        assertEquals(JScreamTape.NULL_VALUE, n.valueType());
 
-        assertEquals("s", keys[3]);
-        assertEquals("hello", values[3].stringValue().toString());
+        assertEquals("s", object.keyAt(3, key).toString());
+        assertEquals("hello", s.stringValue(string).toString());
 
-        assertEquals("x", keys[4]);
-        assertEquals(9876L, values[4].longValue());
+        assertEquals("x", object.keyAt(4, key).toString());
+        assertEquals(9876L, x.longValue());
+    }
+
+    private JSValue parseResource(String resourceName) {
+        ByteArrayBuilder buffer = readResource(resourceName);
+        return new JScreamParser(JavaDoubleParser::parseDouble).parse(buffer, new JSValue());
+    }
+
+    private ByteArrayBuilder readResource(String resourceName) {
+        try (InputStream in = JScreamParserTest.class.getClassLoader().getResourceAsStream(resourceName)) {
+            if (in == null) {
+                throw new IllegalArgumentException("missing resource " + resourceName);
+            }
+            byte[] bytes = in.readAllBytes();
+            ByteArrayBuilder buffer = new ByteArrayBuilder(bytes.length);
+            for (byte b : bytes) {
+                buffer.appendByte(b);
+            }
+            return buffer;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private ByteArrayBuilder utf8Buffer(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        ByteArrayBuilder buffer = new ByteArrayBuilder(bytes.length);
+        for (byte b : bytes) {
+            buffer.appendByte(b);
+        }
+        return buffer;
+    }
+
+    private ByteSlice asciiKey(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.US_ASCII);
+        ByteSlice key = new ByteSlice();
+        key.use(bytes, 0, bytes.length);
+        return key;
     }
 }

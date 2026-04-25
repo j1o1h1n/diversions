@@ -61,14 +61,14 @@ public final class ByteArrayBuilder implements CharSequence {
         bytes[length++] = value;
     }
 
-    public void appendAscii(char value) {
+    public void append(char value) {
         if (value > 0x7F) {
             throw new IllegalArgumentException("non-ASCII char: " + value);
         }
         appendByte((byte) value);
     }
 
-    public void appendAscii(CharSequence value) {
+    public void append(CharSequence value) {
         int len = value.length();
         ensureCapacity(length + len);
         for (int i = 0; i < len; i++) {
@@ -82,15 +82,15 @@ public final class ByteArrayBuilder implements CharSequence {
 
     public void appendLong(long value) {
         if (value == 0) {
-            appendAscii('0');
+            append('0');
             return;
         }
 
         long current = value;
         if (current < 0) {
-            appendAscii('-');
+            append('-');
             if (current == Long.MIN_VALUE) {
-                appendAscii("9223372036854775808");
+                append("9223372036854775808");
                 return;
             }
             current = -current;
@@ -108,45 +108,45 @@ public final class ByteArrayBuilder implements CharSequence {
     }
 
     public void appendDouble(double value) {
-        appendAscii(Double.toString(value));
+        append(Double.toString(value));
     }
 
     public void appendJsonString(CharSequence value) {
-        appendAscii('"');
+        append('"');
         int len = value.length();
         for (int i = 0; i < len; i++) {
             char ch = value.charAt(i);
             switch (ch) {
                 case '"':
-                    appendAscii("\\\"");
+                    append("\\\"");
                     break;
                 case '\\':
-                    appendAscii("\\\\");
+                    append("\\\\");
                     break;
                 case '\b':
-                    appendAscii("\\b");
+                    append("\\b");
                     break;
                 case '\f':
-                    appendAscii("\\f");
+                    append("\\f");
                     break;
                 case '\n':
-                    appendAscii("\\n");
+                    append("\\n");
                     break;
                 case '\r':
-                    appendAscii("\\r");
+                    append("\\r");
                     break;
                 case '\t':
-                    appendAscii("\\t");
+                    append("\\t");
                     break;
                 default:
                     if (ch < 0x20 || ch > 0x7F) {
                         appendUnicodeEscape(ch);
                     } else {
-                        appendAscii(ch);
+                        append(ch);
                     }
             }
         }
-        appendAscii('"');
+        append('"');
     }
 
     @Override
@@ -155,8 +155,8 @@ public final class ByteArrayBuilder implements CharSequence {
     }
 
     private void appendUnicodeEscape(char ch) {
-        appendAscii('\\');
-        appendAscii('u');
+        append('\\');
+        append('u');
         appendHex((ch >>> 12) & 0xF);
         appendHex((ch >>> 8) & 0xF);
         appendHex((ch >>> 4) & 0xF);
@@ -164,7 +164,7 @@ public final class ByteArrayBuilder implements CharSequence {
     }
 
     private void appendHex(int value) {
-        appendAscii((char) (value < 10 ? '0' + value : 'A' + (value - 10)));
+        append((char) (value < 10 ? '0' + value : 'A' + (value - 10)));
     }
 
     private void ensureCapacity(int wanted) {
