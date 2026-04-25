@@ -299,16 +299,11 @@ public final class JScreamDecoder {
         if (position + 4 > limit) {
             throw error("incomplete unicode escape");
         }
-        int value = 0;
         for (int i = 0; i < 4; i++) {
             byte ch = input[position++];
-            value <<= 4;
             if (ch >= '0' && ch <= '9') {
-                value |= ch - '0';
             } else if (ch >= 'A' && ch <= 'F') {
-                value |= 10 + (ch - 'A');
             } else if (ch >= 'a' && ch <= 'f') {
-                value |= 10 + (ch - 'a');
             } else {
                 throw error("invalid unicode escape");
             }

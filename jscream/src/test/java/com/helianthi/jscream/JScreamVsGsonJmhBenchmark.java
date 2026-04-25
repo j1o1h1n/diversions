@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -108,8 +109,94 @@ public class JScreamVsGsonJmhBenchmark {
         }
     }
 
+    @State(Scope.Thread)
+    public static class CitmCatalogState {
+        public byte[] bytes;
+        public ByteArrayBuilder buffer;
+        public JScreamParser jscreamParser;
+        public JSValue root;
+        public JSObject catalog;
+        public JSObject events;
+        public JSArray performances;
+        public JSArray prices;
+        public ByteSlice string;
+        public ByteSlice eventsKey;
+        public ByteSlice performancesKey;
+        public ByteSlice eventIdKey;
+        public ByteSlice pricesKey;
+        public ByteSlice amountKey;
+        public ByteSlice nameKey;
+
+        @Setup(Level.Trial)
+        public void setUp() {
+            bytes = readResource("json/citm_catalog.json");
+            buffer = new ByteArrayBuilder(bytes.length);
+            for (byte b : bytes) {
+                buffer.appendByte(b);
+            }
+            jscreamParser = new JScreamParser(JavaDoubleParser::parseDouble);
+            root = new JSValue();
+            catalog = new JSObject();
+            events = new JSObject();
+            performances = new JSArray();
+            prices = new JSArray();
+            string = new ByteSlice();
+            eventsKey = asciiKey("events");
+            performancesKey = asciiKey("performances");
+            eventIdKey = asciiKey("eventId");
+            pricesKey = asciiKey("prices");
+            amountKey = asciiKey("amount");
+            nameKey = asciiKey("name");
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class GemstonesState {
+        public byte[] bytes;
+        public ByteArrayBuilder buffer;
+        public JScreamParser jscreamParser;
+        public JSValue root;
+        public JSObject gemstones;
+        public ByteSlice string;
+        public String[] keys;
+        public ByteSlice[] keySlices;
+        public int[] randomIndices;
+
+        @Setup(Level.Trial)
+        public void setUp() {
+            bytes = readResource("json/gemstones.json");
+            buffer = new ByteArrayBuilder(bytes.length);
+            for (byte b : bytes) {
+                buffer.appendByte(b);
+            }
+            jscreamParser = new JScreamParser(JavaDoubleParser::parseDouble);
+            root = new JSValue();
+            gemstones = new JSObject();
+            string = new ByteSlice();
+            keys = new String[] {
+                "diamond", "ruby", "sapphire", "emerald", "amethyst",
+                "topaz", "opal", "garnet", "aquamarine", "peridot",
+                "turquoise", "citrine", "spinel", "zircon", "tourmaline",
+                "tanzanite", "moonstone", "sunstone", "lapis", "jade",
+                "onyx", "agate", "jasper", "carnelian", "chalcedony",
+                "alexandrite", "kunzite", "morganite", "heliodor", "iolite",
+                "kyanite", "andalusite", "apatite", "diopside", "tsavorite",
+                "rhodolite", "spessartine", "pyrope", "serpentine", "malachite"
+            };
+            keySlices = new ByteSlice[keys.length];
+            for (int i = 0; i < keys.length; i++) {
+                keySlices[i] = asciiKey(keys[i]);
+            }
+            randomIndices = new int[10];
+            Random random = new Random(12345L);
+            for (int i = 0; i < randomIndices.length; i++) {
+                randomIndices[i] = random.nextInt(keys.length);
+            }
+        }
+    }
+
     @Benchmark
-    public void parseWithJscream(FixtureState state, Blackhole blackhole) {
+    public void parse_jscream(FixtureState state, Blackhole blackhole) {
         JSValue parsed = state.jscreamParser.parse(state.buffer, state.root);
         if (parsed.valueType() == JScreamTape.OBJECT) {
             blackhole.consume(parsed.objectValue(state.object).size());
@@ -123,7 +210,7 @@ public class JScreamVsGsonJmhBenchmark {
     }
 
     @Benchmark
-    public void parseWithGson(FixtureState state, Blackhole blackhole) {
+    public void parse_gson(FixtureState state, Blackhole blackhole) {
         JsonElement root = parseGson(state.bytes);
         if (root.isJsonObject()) {
             blackhole.consume(root.getAsJsonObject().size());
@@ -137,7 +224,7 @@ public class JScreamVsGsonJmhBenchmark {
     }
 
     @Benchmark
-    public void rfcLookupHashWithJscream(RfcObjectState state, Blackhole blackhole) {
+    public void lookup_small_jscream(RfcObjectState state, Blackhole blackhole) {
         JSObject rootObject = state.jscreamParser.parse(state.buffer, state.root).objectValue(state.object);
         JSObject image = rootObject.get(state.imageKey, new JSValue()).objectValue(state.image);
         JSObject thumbnail = image.get(state.thumbnailKey, new JSValue()).objectValue(state.thumbnail);
@@ -160,7 +247,7 @@ public class JScreamVsGsonJmhBenchmark {
     }
 
     @Benchmark
-    public void rfcLookupHashWithGson(RfcObjectState state, Blackhole blackhole) {
+    public void lookup_small_gson(RfcObjectState state, Blackhole blackhole) {
         JsonObject root = parseGson(state.bytes).getAsJsonObject();
         JsonObject image = root.getAsJsonObject("Image");
         JsonObject thumbnail = image.getAsJsonObject("Thumbnail");
@@ -180,6 +267,93 @@ public class JScreamVsGsonJmhBenchmark {
         hash = (31 * hash) + Long.hashCode(ids.get(3).getAsLong());
 
         blackhole.consume(hash);
+    }
+
+    @Benchmark
+    public void lookup_large_jscream(CitmCatalogState state, Blackhole blackhole) {
+        JSObject catalog = state.jscreamParser.parse(state.buffer, state.root).objectValue(state.catalog);
+        JSObject events = catalog.get(state.eventsKey, new JSValue()).objectValue(state.events);
+        JSArray performances = catalog.get(state.performancesKey, new JSValue()).arrayValue(state.performances);
+
+        long total = 0L;
+        for (int i = 0; i < performances.size(); i++) {
+            JSObject performance = performances.valueAt(i, new JSValue()).objectValue(new JSObject());
+            long eventId = performance.get(state.eventIdKey, new JSValue()).longValue();
+            JSValue eventValue = events.get(asciiKey(Long.toString(eventId)), new JSValue());
+            if (eventValue == null) {
+                continue;
+            }
+
+            JSObject event = eventValue.objectValue(new JSObject());
+            String eventName = event.get(state.nameKey, new JSValue()).stringValue(state.string).toString();
+            if (!"Berliner Philharmoniker".equals(eventName)) {
+                continue;
+            }
+
+            JSArray prices = performance.get(state.pricesKey, new JSValue()).arrayValue(state.prices);
+            for (int j = 0; j < prices.size(); j++) {
+                JSObject price = prices.valueAt(j, new JSValue()).objectValue(new JSObject());
+                total += price.get(state.amountKey, new JSValue()).longValue();
+            }
+        }
+
+        blackhole.consume(total);
+    }
+
+    @Benchmark
+    public void lookup_large_gson(CitmCatalogState state, Blackhole blackhole) {
+        JsonObject root = parseGson(state.bytes).getAsJsonObject();
+        JsonObject events = root.getAsJsonObject("events");
+        JsonArray performances = root.getAsJsonArray("performances");
+
+        long total = 0L;
+        for (JsonElement performanceElement : performances) {
+            JsonObject performance = performanceElement.getAsJsonObject();
+            String eventId = performance.get("eventId").getAsString();
+            JsonElement eventElement = events.get(eventId);
+            if (eventElement == null) {
+                continue;
+            }
+
+            JsonObject event = eventElement.getAsJsonObject();
+            if (!"Berliner Philharmoniker".equals(event.get("name").getAsString())) {
+                continue;
+            }
+
+            JsonArray prices = performance.getAsJsonArray("prices");
+            for (JsonElement priceElement : prices) {
+                total += priceElement.getAsJsonObject().get("amount").getAsLong();
+            }
+        }
+
+        blackhole.consume(total);
+    }
+
+    @Benchmark
+    public void lookup_wide_jscream(GemstonesState state, Blackhole blackhole) {
+        JSObject gemstones = state.jscreamParser.parse(state.buffer, state.root).objectValue(state.gemstones);
+
+        int count = 0;
+        for (int i = 0; i < state.randomIndices.length; i++) {
+            int index = state.randomIndices[i];
+            String value = gemstones.get(state.keySlices[index], new JSValue()).stringValue(state.string).toString();
+            count += countLowercaseE(value);
+        }
+
+        blackhole.consume(count);
+    }
+
+    @Benchmark
+    public void lookup_wide_gson(GemstonesState state, Blackhole blackhole) {
+        JsonObject gemstones = parseGson(state.bytes).getAsJsonObject();
+
+        int count = 0;
+        for (int i = 0; i < state.randomIndices.length; i++) {
+            String value = gemstones.get(state.keys[state.randomIndices[i]]).getAsString();
+            count += countLowercaseE(value);
+        }
+
+        blackhole.consume(count);
     }
 
     private static JsonElement parseGson(byte[] bytes) {
@@ -207,5 +381,15 @@ public class JScreamVsGsonJmhBenchmark {
         ByteSlice key = new ByteSlice();
         key.use(bytes, 0, bytes.length);
         return key;
+    }
+
+    private static int countLowercaseE(String value) {
+        int count = 0;
+        for (int i = 0; i < value.length(); i++) {
+            if (value.charAt(i) == 'e') {
+                count++;
+            }
+        }
+        return count;
     }
 }

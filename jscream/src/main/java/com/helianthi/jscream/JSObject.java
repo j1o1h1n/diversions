@@ -34,11 +34,11 @@ public final class JSObject {
     }
 
     public boolean containsKey(ByteSlice key) {
-        return indexOf(key) >= 0;
+        return parent.indexOfObjectKey(e, key) >= 0;
     }
 
     public JSValue get(ByteSlice key, JSValue target) {
-        int index = indexOf(key);
+        int index = parent.indexOfObjectKey(e, key);
         return index < 0 ? null : valueAt(index, target);
     }
 
@@ -51,35 +51,5 @@ public final class JSObject {
         if (e < 0) {
             throw new IllegalStateException("object handle is not initialized");
         }
-    }
-
-    private int indexOf(ByteSlice wanted) {
-        requireEntry();
-        int size = packedLists.size(e);
-        ByteSlice key = new ByteSlice();
-        for (int i = 0; i < size; i++) {
-            keyAt(i, key);
-            if (contentEquals(key, wanted)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private boolean contentEquals(ByteSlice left, ByteSlice right) {
-        int length = left.length();
-        if (length != right.length()) {
-            return false;
-        }
-        byte[] leftBytes = left.bytes();
-        byte[] rightBytes = right.bytes();
-        int leftPos = left.pos();
-        int rightPos = right.pos();
-        for (int i = 0; i < length; i++) {
-            if (leftBytes[leftPos + i] != rightBytes[rightPos + i]) {
-                return false;
-            }
-        }
-        return true;
     }
 }

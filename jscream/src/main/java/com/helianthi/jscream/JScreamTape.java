@@ -100,6 +100,36 @@ public final class JScreamTape {
         return target.use(this, packedLists, h, (int) values[h]);
     }
 
+    final ByteSlice keyBuffer = new ByteSlice();
+
+    int indexOfObjectKey(int objectEntry, ByteSlice wanted) {
+        int size = packedLists.size(objectEntry);
+        for (int i = 0; i < size; i++) {
+            stringValue(packedLists.get(objectEntry, i), keyBuffer);
+            if (contentEquals(keyBuffer, wanted)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean contentEquals(ByteSlice left, ByteSlice right) {
+        int length = left.length();
+        if (length != right.length()) {
+            return false;
+        }
+        byte[] leftBytes = left.bytes();
+        byte[] rightBytes = right.bytes();
+        int leftPos = left.pos();
+        int rightPos = right.pos();
+        for (int i = 0; i < length; i++) {
+            if (leftBytes[leftPos + i] != rightBytes[rightPos + i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public ByteSlice rawValue(int h, ByteSlice target) {
         if (tape[h] != ARRAY && tape[h] != OBJECT) {
             throw new IllegalStateException("expected array/object but was " + tape[h]);
@@ -220,7 +250,8 @@ public final class JScreamTape {
         ensureCapacity(tapeHead + 1, stackHead);
         tape[tapeHead] = STRING;
         int length = slice.length();
-        values[tapeHead] = pack(slice.pos(), containsEscape(slice) ? -length : length);
+        boolean escaped = containsEscape(slice);
+        values[tapeHead] = pack(slice.pos(), escaped ? -length : length);
         if (state == STATE_ARRAY || state == STATE_OBJECT_KEY) {
             linkedLists.append((int) stack[stackHead], tapeHead);
         }
@@ -448,6 +479,7 @@ public final class JScreamTape {
         decodedString.appendByte((byte) (0x80 | ((codePoint >>> 6) & 0x3F)));
         decodedString.appendByte((byte) (0x80 | (codePoint & 0x3F)));
     }
+
 
     private void requireType(int h, char expected) {
         if (tape[h] != expected) {

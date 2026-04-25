@@ -28,9 +28,13 @@ public final class JSArray {
         return packedLists.size(h);
     }
 
-    public JSValue valueAt(int index, JSValue target) {
+    public JSValue get(int index, JSValue target) {
         requireHandle();
         return parent.value(packedLists.get(h, index), target);
+    }
+
+    public JSValue valueAt(int index, JSValue target) {
+        return get(index, target);
     }
 
     private void requireHandle() {

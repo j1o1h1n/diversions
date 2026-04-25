@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class JScreamParserTest {
@@ -193,6 +194,7 @@ class JScreamParserTest {
         assertEquals(JScreamTape.OBJECT, parseResource("json/jsonsuite-valid-basic-object.json").valueType());
         assertEquals(JScreamTape.OBJECT, parseResource("json/canada.json").valueType());
         assertEquals(JScreamTape.OBJECT, parseResource("json/citm_catalog.json").valueType());
+        assertEquals(JScreamTape.OBJECT, parseResource("json/gemstones.json").valueType());
     }
 
     @Test
@@ -218,6 +220,79 @@ class JScreamParserTest {
         hash = (31 * hash) + Long.hashCode(ids.valueAt(3, new JSValue()).longValue());
 
         assertEquals(-19782094, hash);
+    }
+
+    @Test
+    void sumsBerlinerPhilharmonikerPerformancePricesFromCitmCatalog() {
+        JSValue root = parseResource("json/citm_catalog.json");
+        JSObject catalog = root.objectValue(new JSObject());
+        JSObject events = catalog.get(asciiKey("events"), new JSValue()).objectValue(new JSObject());
+        JSArray performances = catalog.get(asciiKey("performances"), new JSValue()).arrayValue(new JSArray());
+        ByteSlice string = new ByteSlice();
+
+        long total = 0L;
+        for (int i = 0; i < performances.size(); i++) {
+            JSObject performance = performances.valueAt(i, new JSValue()).objectValue(new JSObject());
+            long eventId = performance.get(asciiKey("eventId"), new JSValue()).longValue();
+            JSValue eventValue = events.get(asciiKey(Long.toString(eventId)), new JSValue());
+            if (eventValue == null) {
+                continue;
+            }
+
+            JSObject event = eventValue.objectValue(new JSObject());
+            String eventName = event.get(asciiKey("name"), new JSValue()).stringValue(string).toString();
+            if (!"Berliner Philharmoniker".equals(eventName)) {
+                continue;
+            }
+
+            JSArray prices = performance.get(asciiKey("prices"), new JSValue()).arrayValue(new JSArray());
+            for (int j = 0; j < prices.size(); j++) {
+                JSObject price = prices.valueAt(j, new JSValue()).objectValue(new JSObject());
+                total += price.get(asciiKey("amount"), new JSValue()).longValue();
+            }
+        }
+
+        assertEquals(789500L, total);
+    }
+
+    @Test
+    void countsECharactersAcrossDeterministicRandomGemstoneLookups() {
+        JSValue root = parseResource("json/gemstones.json");
+        JSObject gemstones = root.objectValue(new JSObject());
+        ByteSlice string = new ByteSlice();
+        String[] knownKeys = {
+            "diamond", "ruby", "sapphire", "emerald", "amethyst",
+            "topaz", "opal", "garnet", "aquamarine", "peridot",
+            "turquoise", "citrine", "spinel", "zircon", "tourmaline",
+            "tanzanite", "moonstone", "sunstone", "lapis", "jade",
+            "onyx", "agate", "jasper", "carnelian", "chalcedony",
+            "alexandrite", "kunzite", "morganite", "heliodor", "iolite",
+            "kyanite", "andalusite", "apatite", "diopside", "tsavorite",
+            "rhodolite", "spessartine", "pyrope", "serpentine", "malachite"
+        };
+        int[] expectedECounts = {
+            5, 2, 3, 5, 3,
+            5, 2, 6, 7, 7,
+            6, 2, 3, 2, 5,
+            3, 4, 4, 4, 7,
+            3, 5, 2, 4, 2,
+            5, 5, 5, 3, 5,
+            4, 5, 6, 6, 4,
+            6, 2, 3, 8, 6
+        };
+        Random random = new Random();
+
+        int expected = 0;
+        int count = 0;
+        for (int i = 0; i < 10; i++) {
+            int index = random.nextInt(knownKeys.length);
+            String key = knownKeys[index];
+            expected += expectedECounts[index];
+            String value = gemstones.get(asciiKey(key), new JSValue()).stringValue(string).toString();
+            count += countLowercaseE(value);
+        }
+
+        assertEquals(expected, count);
     }
 
     @Test
@@ -371,5 +446,15 @@ class JScreamParserTest {
         ByteSlice key = new ByteSlice();
         key.use(bytes, 0, bytes.length);
         return key;
+    }
+
+    private int countLowercaseE(String value) {
+        int count = 0;
+        for (int i = 0; i < value.length(); i++) {
+            if (value.charAt(i) == 'e') {
+                count++;
+            }
+        }
+        return count;
     }
 }
