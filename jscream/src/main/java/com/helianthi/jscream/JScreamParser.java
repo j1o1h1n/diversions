@@ -23,8 +23,10 @@ public final class JScreamParser {
         for (JSToken token = decoder.next(); token != JSToken.EOF; token = decoder.next()) {
             switch (token) {
                 case FIELD_NAME:
+                    tape.addObjectKey((ByteSlice) decoder.stringValue(), decoder.stringWasEscaped());
+                    break;
                 case STRING:
-                    tape.addString((ByteSlice) decoder.stringValue());
+                    tape.addStringValue((ByteSlice) decoder.stringValue(), decoder.stringWasEscaped());
                     break;
                 case LONG:
                     tape.addInt64(decoder.longValue());

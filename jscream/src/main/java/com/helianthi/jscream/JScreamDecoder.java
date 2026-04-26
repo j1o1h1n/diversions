@@ -36,6 +36,7 @@ public final class JScreamDecoder {
     private int numberLength;
     private int tokenStart;
     private int tokenEnd;
+    private boolean stringWasEscaped;
 
     public JScreamDecoder prepare(ByteArrayBuilder source) {
         return prepare(source.buffer(), source.size());
@@ -56,6 +57,7 @@ public final class JScreamDecoder {
         this.numberLength = 0;
         this.tokenStart = 0;
         this.tokenEnd = 0;
+        this.stringWasEscaped = false;
         return this;
     }
 
@@ -190,6 +192,13 @@ public final class JScreamDecoder {
         return stringView;
     }
 
+    public boolean stringWasEscaped() {
+        if (token != JSToken.FIELD_NAME && token != JSToken.STRING) {
+            throw new IllegalStateException("current token is not a string token");
+        }
+        return stringWasEscaped;
+    }
+
     public CharSequence numberText() {
         if (token != JSToken.NUMBER) {
             throw new IllegalStateException("current token is not NUMBER");
@@ -251,19 +260,24 @@ public final class JScreamDecoder {
                 throw error("unexpected token");
         }
     }
-
-    int hash;
     private void parseString() {
         expect('"');
         int start = position;
-        hash = 1;
+        boolean escaped = false;
+        int hash = 1;
         while (position < limit) {
             byte ch = input[position++];
             if (ch == '"') {
-                stringView.use(input, start, (position - 1) - start, hash);
+                stringWasEscaped = escaped;
+                if (escaped) {
+                    stringView.use(input, start, (position - 1) - start);
+                } else {
+                    stringView.use(input, start, (position - 1) - start, hash);
+                }
                 return;
             }
             if (ch == '\\') {
+                escaped = true;
                 validateEscape();
                 continue;
             }

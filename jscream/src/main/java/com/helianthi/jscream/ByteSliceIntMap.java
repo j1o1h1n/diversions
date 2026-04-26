@@ -86,12 +86,6 @@ final class ByteSliceIntMap {
                 size++;
                 return;
             }
-            if (unpackLeft(packedKey) == objectEntry
-                && unpackRight(packedKey) == hash
-                && keyEquals(values[slot], key)) {
-                values[slot] = keyHandle;
-                return;
-            }
             slot = (slot + 1) & (keys.length - 1);
         }
     }

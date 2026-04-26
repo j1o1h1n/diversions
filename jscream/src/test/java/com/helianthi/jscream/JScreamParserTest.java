@@ -188,6 +188,21 @@ class JScreamParserTest {
     }
 
     @Test
+    void looksUpEscapedObjectKeyByDecodedValue() {
+        ByteArrayBuilder buffer = new ByteArrayBuilder(64);
+        buffer.append("{\"caf\\u00e9\":1}");
+
+        JSValue root = new JScreamParser().parse(buffer, new JSValue());
+        JSObject object = root.objectValue(new JSObject());
+        ByteSlice key = new ByteSlice();
+        byte[] bytes = "café".getBytes(StandardCharsets.UTF_8);
+        key.use(bytes, 0, bytes.length);
+
+        assertTrue(object.containsKey(key));
+        assertEquals(1L, object.get(key, new JSValue()).longValue());
+    }
+
+    @Test
     void parsesReferenceJsonFixturesFromResources() {
         assertEquals(JScreamTape.OBJECT, parseResource("json/rfc-example-object.json").valueType());
         assertEquals(JScreamTape.ARRAY, parseResource("json/rfc-example-array.json").valueType());

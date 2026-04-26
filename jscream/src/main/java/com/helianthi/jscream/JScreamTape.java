@@ -3,6 +3,7 @@ package com.helianthi.jscream;
 import java.util.Arrays;
 
 public final class JScreamTape {
+    private static final int HASH_NOT_STORED = Integer.MIN_VALUE;
 
     public static final char ARRAY = '[';
     public static final char OBJECT = '{';
@@ -22,6 +23,7 @@ public final class JScreamTape {
 
     private char[] tape = new char[256];
     private long[] values = new long[256];
+    private int[] stringHashes = new int[256];
     private long[] rawRanges = new long[256];
     private long[] stack = new long[256];
     private int[] stackHandles = new int[256];
@@ -80,14 +82,23 @@ public final class JScreamTape {
         long packed = values[h];
         int pos = unpackLeft(packed);
         int length = unpackRight(packed);
+        int hash = stringHashes[h];
         if (length >= 0) {
-            target.use(bytes, pos, length);
+            if (hash == HASH_NOT_STORED) {
+                target.use(bytes, pos, length);
+            } else {
+                target.use(bytes, pos, length, hash);
+            }
             return target;
         }
 
         decodedString.clear();
         decodeString(pos, -length);
-        target.use(decodedString.buffer(), 0, decodedString.size());
+        if (hash == HASH_NOT_STORED) {
+            target.use(decodedString.buffer(), 0, decodedString.size());
+        } else {
+            target.use(decodedString.buffer(), 0, decodedString.size(), hash);
+        }
         return target;
     }
 
@@ -158,6 +169,7 @@ public final class JScreamTape {
         this.objectKeyIndex.clear();
         Arrays.fill(this.tape, (char) 0);
         Arrays.fill(this.values, 0L);
+        Arrays.fill(this.stringHashes, HASH_NOT_STORED);
         Arrays.fill(this.rawRanges, 0L);
         Arrays.fill(this.stack, 0L);
         Arrays.fill(this.stackHandles, 0);
@@ -262,15 +274,32 @@ public final class JScreamTape {
         this.state = stackHead < 0 ? STATE_NONE : this.tape[this.linkedLists.get((int) stack[stackHead], 0) - 1] == ARRAY ? STATE_ARRAY : STATE_OBJECT_KEY;
     }
 
-    public void addString(ByteSlice slice) {
+    public void addObjectKey(ByteSlice slice, boolean escaped) {
+        if (state == STATE_DONE) {
+            throw invalidState("cannot add string after close()");
+        }
+        if (state != STATE_OBJECT_KEY) {
+            throw invalidState("object key must be added in object-key state");
+        }
+        ensureCapacity(tapeHead + 1, stackHead);
+        tape[tapeHead] = STRING;
+        int length = slice.length();
+        values[tapeHead] = pack(slice.pos(), escaped ? -length : length);
+        stringHashes[tapeHead] = escaped ? hashCode(slice, true) : slice.hashCode();
+        linkedLists.append((int) stack[stackHead], tapeHead);
+        state = STATE_OBJECT_VALUE;
+        tapeHead++;
+    }
+
+    public void addStringValue(ByteSlice slice, boolean escaped) {
         if (state == STATE_DONE) {
             throw invalidState("cannot add string after close()");
         }
         ensureCapacity(tapeHead + 1, stackHead);
         tape[tapeHead] = STRING;
         int length = slice.length();
-        boolean escaped = containsEscape(slice);
         values[tapeHead] = pack(slice.pos(), escaped ? -length : length);
+        stringHashes[tapeHead] = HASH_NOT_STORED;
         if (state == STATE_ARRAY || state == STATE_OBJECT_KEY) {
             linkedLists.append((int) stack[stackHead], tapeHead);
         }
@@ -360,12 +389,15 @@ public final class JScreamTape {
 
     void ensureCapacity(int requiredTape, int requiredStack) {
         if (requiredTape > tape.length) {
-            int newLength = tape.length;
+            int oldLength = tape.length;
+            int newLength = oldLength;
             while (newLength < requiredTape) {
                 newLength <<= 1;
             }
             tape = Arrays.copyOf(tape, newLength);
             values = Arrays.copyOf(values, newLength);
+            stringHashes = Arrays.copyOf(stringHashes, newLength);
+            Arrays.fill(stringHashes, oldLength, newLength, HASH_NOT_STORED);
             rawRanges = Arrays.copyOf(rawRanges, newLength);
         }
 
@@ -392,15 +424,23 @@ public final class JScreamTape {
         return ((long) left << 32) | (right & 0xFFFF_FFFFL);
     }
 
-    private boolean containsEscape(ByteSlice slice) {
-        int pos = slice.pos();
-        int end = pos + slice.length();
-        for (int i = pos; i < end; i++) {
-            if (bytes[i] == '\\') {
-                return true;
-            }
+    private int hashCode(ByteSlice slice, boolean escaped) {
+        if (!escaped) {
+            return hashCode(slice.bytes(), slice.pos(), slice.length());
         }
-        return false;
+
+        decodedString.clear();
+        decodeString(slice.pos(), slice.length());
+        return hashCode(decodedString.buffer(), 0, decodedString.size());
+    }
+
+    private static int hashCode(byte[] bytes, int pos, int length) {
+        int hash = 1;
+        int end = pos + length;
+        for (int i = pos; i < end; i++) {
+            hash = (31 * hash) + bytes[i];
+        }
+        return hash;
     }
 
     private void decodeString(int pos, int length) {

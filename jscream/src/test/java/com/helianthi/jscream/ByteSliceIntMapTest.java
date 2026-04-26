@@ -52,8 +52,10 @@ class ByteSliceIntMapTest {
         for (JSToken token = decoder.next(); token != JSToken.EOF; token = decoder.next()) {
             switch (token) {
                 case FIELD_NAME:
+                    tape.addObjectKey(decoder.stringValue(), decoder.stringWasEscaped());
+                    break;
                 case STRING:
-                    tape.addString(decoder.stringValue());
+                    tape.addStringValue(decoder.stringValue(), decoder.stringWasEscaped());
                     break;
                 case START_OBJECT:
                     tape.addObject(decoder.tokenStart());
