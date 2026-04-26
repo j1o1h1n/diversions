@@ -11,7 +11,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -119,6 +118,10 @@ public class JScreamVsGsonJmhBenchmark {
         public JSObject events;
         public JSArray performances;
         public JSArray prices;
+        public JSObject performance;
+        public JSObject event;
+        public JSObject price;
+        public JSValue value;
         public ByteSlice string;
         public ByteSlice eventsKey;
         public ByteSlice performancesKey;
@@ -140,6 +143,10 @@ public class JScreamVsGsonJmhBenchmark {
             events = new JSObject();
             performances = new JSArray();
             prices = new JSArray();
+            performance = new JSObject();
+            event = new JSObject();
+            price = new JSObject();
+            value = new JSValue();
             string = new ByteSlice();
             eventsKey = asciiKey("events");
             performancesKey = asciiKey("performances");
@@ -157,10 +164,12 @@ public class JScreamVsGsonJmhBenchmark {
         public JScreamParser jscreamParser;
         public JSValue root;
         public JSObject gemstones;
+        public JSValue value;
         public ByteSlice string;
         public String[] keys;
         public ByteSlice[] keySlices;
-        public int[] randomIndices;
+        public int expectedCountPerPass;
+        public int expectedTotalCount;
 
         @Setup(Level.Trial)
         public void setUp() {
@@ -172,6 +181,7 @@ public class JScreamVsGsonJmhBenchmark {
             jscreamParser = new JScreamParser(JavaDoubleParser::parseDouble);
             root = new JSValue();
             gemstones = new JSObject();
+            value = new JSValue();
             string = new ByteSlice();
             keys = new String[] {
                 "diamond", "ruby", "sapphire", "emerald", "amethyst",
@@ -181,17 +191,18 @@ public class JScreamVsGsonJmhBenchmark {
                 "onyx", "agate", "jasper", "carnelian", "chalcedony",
                 "alexandrite", "kunzite", "morganite", "heliodor", "iolite",
                 "kyanite", "andalusite", "apatite", "diopside", "tsavorite",
-                "rhodolite", "spessartine", "pyrope", "serpentine", "malachite"
+                "rhodolite", "spessartine", "pyrope", "serpentine", "malachite",
+                "rose", "lily", "tulip", "daisy", "orchid",
+                "violet", "iris", "poppy", "peony", "lotus",
+                "jasmine", "lavender", "sunflower", "magnolia", "camellia",
+                "gardenia", "hibiscus", "marigold", "azalea", "begonia"
             };
             keySlices = new ByteSlice[keys.length];
             for (int i = 0; i < keys.length; i++) {
                 keySlices[i] = asciiKey(keys[i]);
             }
-            randomIndices = new int[10];
-            Random random = new Random(12345L);
-            for (int i = 0; i < randomIndices.length; i++) {
-                randomIndices[i] = random.nextInt(keys.length);
-            }
+            expectedCountPerPass = 267;
+            expectedTotalCount = expectedCountPerPass * 3;
         }
     }
 
@@ -277,23 +288,23 @@ public class JScreamVsGsonJmhBenchmark {
 
         long total = 0L;
         for (int i = 0; i < performances.size(); i++) {
-            JSObject performance = performances.valueAt(i, new JSValue()).objectValue(new JSObject());
-            long eventId = performance.get(state.eventIdKey, new JSValue()).longValue();
-            JSValue eventValue = events.get(asciiKey(Long.toString(eventId)), new JSValue());
+            JSObject performance = performances.valueAt(i, state.value).objectValue(state.performance);
+            long eventId = performance.get(state.eventIdKey, state.value).longValue();
+            JSValue eventValue = events.get(asciiKey(Long.toString(eventId)), state.value);
             if (eventValue == null) {
                 continue;
             }
 
-            JSObject event = eventValue.objectValue(new JSObject());
-            String eventName = event.get(state.nameKey, new JSValue()).stringValue(state.string).toString();
+            JSObject event = eventValue.objectValue(state.event);
+            String eventName = event.get(state.nameKey, state.value).stringValue(state.string).toString();
             if (!"Berliner Philharmoniker".equals(eventName)) {
                 continue;
             }
 
-            JSArray prices = performance.get(state.pricesKey, new JSValue()).arrayValue(state.prices);
+            JSArray prices = performance.get(state.pricesKey, state.value).arrayValue(state.prices);
             for (int j = 0; j < prices.size(); j++) {
-                JSObject price = prices.valueAt(j, new JSValue()).objectValue(new JSObject());
-                total += price.get(state.amountKey, new JSValue()).longValue();
+                JSObject price = prices.valueAt(j, state.value).objectValue(state.price);
+                total += price.get(state.amountKey, state.value).longValue();
             }
         }
 
@@ -334,10 +345,14 @@ public class JScreamVsGsonJmhBenchmark {
         JSObject gemstones = state.jscreamParser.parse(state.buffer, state.root).objectValue(state.gemstones);
 
         int count = 0;
-        for (int i = 0; i < state.randomIndices.length; i++) {
-            int index = state.randomIndices[i];
-            String value = gemstones.get(state.keySlices[index], new JSValue()).stringValue(state.string).toString();
-            count += countLowercaseE(value);
+        for (int pass = 0; pass < 3; pass++) {
+            for (int i = 0; i < state.keys.length; i++) {
+                String value = gemstones.get(state.keySlices[i], state.value).stringValue(state.string).toString();
+                count += countLowercaseE(value);
+            }
+        }
+        if (count != state.expectedTotalCount) {
+            throw new IllegalStateException("unexpected count " + count);
         }
 
         blackhole.consume(count);
@@ -348,9 +363,14 @@ public class JScreamVsGsonJmhBenchmark {
         JsonObject gemstones = parseGson(state.bytes).getAsJsonObject();
 
         int count = 0;
-        for (int i = 0; i < state.randomIndices.length; i++) {
-            String value = gemstones.get(state.keys[state.randomIndices[i]]).getAsString();
-            count += countLowercaseE(value);
+        for (int pass = 0; pass < 3; pass++) {
+            for (int i = 0; i < state.keys.length; i++) {
+                String value = gemstones.get(state.keys[i]).getAsString();
+                count += countLowercaseE(value);
+            }
+        }
+        if (count != state.expectedTotalCount) {
+            throw new IllegalStateException("unexpected count " + count);
         }
 
         blackhole.consume(count);
