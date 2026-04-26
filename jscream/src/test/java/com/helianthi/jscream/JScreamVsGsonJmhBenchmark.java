@@ -129,6 +129,7 @@ public class JScreamVsGsonJmhBenchmark {
         public ByteSlice pricesKey;
         public ByteSlice amountKey;
         public ByteSlice nameKey;
+        public ByteSlice[] performanceEventKeys;
 
         @Setup(Level.Trial)
         public void setUp() {
@@ -154,6 +155,14 @@ public class JScreamVsGsonJmhBenchmark {
             pricesKey = asciiKey("prices");
             amountKey = asciiKey("amount");
             nameKey = asciiKey("name");
+
+            JsonObject root = parseGson(bytes).getAsJsonObject();
+            JsonArray performanceArray = root.getAsJsonArray("performances");
+            performanceEventKeys = new ByteSlice[performanceArray.size()];
+            for (int i = 0; i < performanceArray.size(); i++) {
+                long eventId = performanceArray.get(i).getAsJsonObject().get("eventId").getAsLong();
+                performanceEventKeys[i] = asciiKey(Long.toString(eventId));
+            }
         }
     }
 
@@ -289,8 +298,8 @@ public class JScreamVsGsonJmhBenchmark {
         long total = 0L;
         for (int i = 0; i < performances.size(); i++) {
             JSObject performance = performances.valueAt(i, state.value).objectValue(state.performance);
-            long eventId = performance.get(state.eventIdKey, state.value).longValue();
-            JSValue eventValue = events.get(asciiKey(Long.toString(eventId)), state.value);
+            performance.get(state.eventIdKey, state.value).longValue();
+            JSValue eventValue = events.get(state.performanceEventKeys[i], state.value);
             if (eventValue == null) {
                 continue;
             }

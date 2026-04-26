@@ -11,6 +11,7 @@ final class ByteSliceIntMap {
 
     private long[] keys = new long[16];
     private int[] values = new int[16];
+    private int[] usedSlots = new int[16];
     private int size;
 
     ByteSliceIntMap(JScreamTape parent) {
@@ -41,8 +42,11 @@ final class ByteSliceIntMap {
     }
 
     void clear() {
-        Arrays.fill(keys, EMPTY);
-        Arrays.fill(values, 0);
+        for (int i = 0; i < size; i++) {
+            int slot = usedSlots[i];
+            keys[slot] = EMPTY;
+            values[slot] = 0;
+        }
         size = 0;
     }
 
@@ -55,6 +59,7 @@ final class ByteSliceIntMap {
         int[] oldValues = values;
         keys = new long[oldKeys.length << 1];
         values = new int[oldValues.length << 1];
+        usedSlots = new int[usedSlots.length << 1];
         Arrays.fill(keys, EMPTY);
         size = 0;
         for (int i = 0; i < oldKeys.length; i++) {
@@ -73,6 +78,7 @@ final class ByteSliceIntMap {
         }
         keys[slot] = pack(objectEntry, hash);
         values[slot] = keyHandle;
+        usedSlots[size] = slot;
         size++;
     }
 
@@ -83,6 +89,7 @@ final class ByteSliceIntMap {
             if (packedKey == EMPTY) {
                 keys[slot] = pack(objectEntry, hash);
                 values[slot] = keyHandle;
+                usedSlots[size] = slot;
                 size++;
                 return;
             }

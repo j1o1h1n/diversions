@@ -24,6 +24,7 @@ public final class JScreamTape {
     private char[] tape = new char[256];
     private long[] values = new long[256];
     private int[] stringHashes = new int[256];
+    private byte[][] decodedStrings = new byte[256][];
     private long[] rawRanges = new long[256];
     private long[] stack = new long[256];
     private int[] stackHandles = new int[256];
@@ -92,12 +93,18 @@ public final class JScreamTape {
             return target;
         }
 
-        decodedString.clear();
-        decodeString(pos, -length);
+        byte[] decoded = decodedStrings[h];
+        if (decoded == null) {
+            decodedString.clear();
+            decodeString(pos, -length);
+            decoded = new byte[decodedString.size()];
+            System.arraycopy(decodedString.buffer(), 0, decoded, 0, decoded.length);
+            decodedStrings[h] = decoded;
+        }
         if (hash == HASH_NOT_STORED) {
-            target.use(decodedString.buffer(), 0, decodedString.size());
+            target.use(decoded, 0, decoded.length);
         } else {
-            target.use(decodedString.buffer(), 0, decodedString.size(), hash);
+            target.use(decoded, 0, decoded.length, hash);
         }
         return target;
     }
@@ -164,15 +171,11 @@ public final class JScreamTape {
         this.tapeHead = 0;
         this.stackHead = -1;
         this.state = STATE_NONE;
+        this.bytes = new byte[0];
+        this.decodedString.clear();
         this.linkedLists.reset();
         this.packedLists.reset();
         this.objectKeyIndex.clear();
-        Arrays.fill(this.tape, (char) 0);
-        Arrays.fill(this.values, 0L);
-        Arrays.fill(this.stringHashes, HASH_NOT_STORED);
-        Arrays.fill(this.rawRanges, 0L);
-        Arrays.fill(this.stack, 0L);
-        Arrays.fill(this.stackHandles, 0);
     }
 
     // builders
@@ -286,6 +289,7 @@ public final class JScreamTape {
         int length = slice.length();
         values[tapeHead] = pack(slice.pos(), escaped ? -length : length);
         stringHashes[tapeHead] = escaped ? hashCode(slice, true) : slice.hashCode();
+        decodedStrings[tapeHead] = null;
         linkedLists.append((int) stack[stackHead], tapeHead);
         state = STATE_OBJECT_VALUE;
         tapeHead++;
@@ -300,6 +304,7 @@ public final class JScreamTape {
         int length = slice.length();
         values[tapeHead] = pack(slice.pos(), escaped ? -length : length);
         stringHashes[tapeHead] = HASH_NOT_STORED;
+        decodedStrings[tapeHead] = null;
         if (state == STATE_ARRAY || state == STATE_OBJECT_KEY) {
             linkedLists.append((int) stack[stackHead], tapeHead);
         }
@@ -398,6 +403,7 @@ public final class JScreamTape {
             values = Arrays.copyOf(values, newLength);
             stringHashes = Arrays.copyOf(stringHashes, newLength);
             Arrays.fill(stringHashes, oldLength, newLength, HASH_NOT_STORED);
+            decodedStrings = Arrays.copyOf(decodedStrings, newLength);
             rawRanges = Arrays.copyOf(rawRanges, newLength);
         }
 
